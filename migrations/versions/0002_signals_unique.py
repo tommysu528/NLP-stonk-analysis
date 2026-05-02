@@ -31,12 +31,16 @@ def upgrade() -> None:
         )
         """
     )
-    op.create_unique_constraint(
-        "uq_signals_ticker_ts_type",
-        "signals",
-        ["ticker", "timestamp", "signal_type"],
-    )
+    # Use batch mode so SQLite (which can't ALTER ADD CONSTRAINT) is also
+    # supported via the copy-and-move strategy. Postgres still gets a
+    # plain ALTER under the hood.
+    with op.batch_alter_table("signals") as batch_op:
+        batch_op.create_unique_constraint(
+            "uq_signals_ticker_ts_type",
+            ["ticker", "timestamp", "signal_type"],
+        )
 
 
 def downgrade() -> None:
-    op.drop_constraint("uq_signals_ticker_ts_type", "signals", type_="unique")
+    with op.batch_alter_table("signals") as batch_op:
+        batch_op.drop_constraint("uq_signals_ticker_ts_type", type_="unique")
