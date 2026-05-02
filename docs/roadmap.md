@@ -27,7 +27,7 @@ You can run the full pipeline end-to-end on at least one ticker for one week of 
 Start with **10 tickers** at **daily resolution**:
 
 ```
-AAPL  MSFT  NVDA  TSLA  AMZN  META  GOOGL  AMD  NFLX  JPM
+AAPL  MSFT  NVDA  TSLA  AMZN  META  GOOGL  AMD  NFLX  LZ
 ```
 
 Why these:

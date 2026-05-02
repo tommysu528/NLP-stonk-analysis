@@ -43,7 +43,7 @@ TICKER_QUERIES: dict[str, str] = {
     "GOOGL": '"Alphabet" OR "Google" OR "GOOGL"',
     "AMD": '"AMD" OR "Advanced Micro Devices"',
     "NFLX": '"Netflix" OR "NFLX"',
-    "JPM": '"JPMorgan" OR "JP Morgan" OR "JPM"',
+    "LZ": '"LegalZoom" OR "Legal Zoom"',
 }
 
 

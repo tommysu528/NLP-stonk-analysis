@@ -21,7 +21,7 @@ jobs:
       DATABASE_URL: sqlite:///data/stonk.db
       NEWSAPI_KEY: ${{ secrets.NEWSAPI_KEY }}
       SENTIMENT_MODEL: ProsusAI/finbert
-      TICKERS: AAPL,MSFT,NVDA,TSLA,AMZN,META,GOOGL,AMD,NFLX,JPM
+      TICKERS: AAPL,MSFT,NVDA,TSLA,AMZN,META,GOOGL,AMD,NFLX,LZ
     steps:
       - uses: actions/checkout@v4
 

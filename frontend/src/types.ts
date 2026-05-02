@@ -54,5 +54,5 @@ export interface BacktestResult {
 
 export const TICKERS = [
   "AAPL", "MSFT", "NVDA", "TSLA", "AMZN",
-  "META", "GOOGL", "AMD", "NFLX", "JPM",
+  "META", "GOOGL", "AMD", "NFLX", "LZ",
 ];

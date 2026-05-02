@@ -23,8 +23,8 @@ TICKER_DICT = {
     "Alphabet":  "GOOGL",
     "AMD":       "AMD",
     "Netflix":   "NFLX",
-    "JPMorgan":  "JPM",
-    "JP Morgan": "JPM",
+    "LegalZoom": "LZ",
+    "Legal Zoom": "LZ",
 }
 ```
 

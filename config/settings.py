@@ -7,7 +7,7 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg://stonk:stonk@localhost:5432/stonk"
     newsapi_key: str = ""
     sentiment_model: str = "ProsusAI/finbert"
-    tickers: str = "AAPL,MSFT,NVDA,TSLA,AMZN,META,GOOGL,AMD,NFLX,JPM"
+    tickers: str = "AAPL,MSFT,NVDA,TSLA,AMZN,META,GOOGL,AMD,NFLX,LZ"
     ingest_interval_minutes: int = 60
 
     @property

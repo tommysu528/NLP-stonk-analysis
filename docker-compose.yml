@@ -23,7 +23,7 @@ services:
       DATABASE_URL: postgresql+psycopg://stonk:stonk@db:5432/stonk
       NEWSAPI_KEY: ${NEWSAPI_KEY}
       SENTIMENT_MODEL: ${SENTIMENT_MODEL:-ProsusAI/finbert}
-      TICKERS: ${TICKERS:-AAPL,MSFT,NVDA,TSLA,AMZN,META,GOOGL,AMD,NFLX,JPM}
+      TICKERS: ${TICKERS:-AAPL,MSFT,NVDA,TSLA,AMZN,META,GOOGL,AMD,NFLX,LZ}
     depends_on:
       db:
         condition: service_healthy

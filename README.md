@@ -142,7 +142,7 @@ This repo is set up to host itself on GitHub Pages with no external infrastructu
 
 ## Scope
 
-Start with 10 tickers — `AAPL, MSFT, NVDA, TSLA, AMZN, META, GOOGL, AMD, NFLX, JPM` — at daily resolution. Move to intraday once the end-to-end pipeline produces a credible backtest report.
+Start with 10 tickers — `AAPL, MSFT, NVDA, TSLA, AMZN, META, GOOGL, AMD, NFLX, LZ` — at daily resolution. Move to intraday once the end-to-end pipeline produces a credible backtest report.
 
 ---
 

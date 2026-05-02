@@ -18,7 +18,7 @@ TICKER_ALIASES: dict[str, tuple[str, ...]] = {
     "GOOGL": ("Alphabet", "Google", "GOOGL", "GOOG"),
     "AMD": ("AMD", "Advanced Micro Devices"),
     "NFLX": ("Netflix", "NFLX"),
-    "JPM": ("JPMorgan", "JP Morgan", "JPMorgan Chase", "JPM"),
+    "LZ": ("LegalZoom", "Legal Zoom"),
 }
 
 # Compile once. Word boundaries to avoid matching "Applesauce" or "rampant".
