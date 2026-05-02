@@ -35,10 +35,12 @@ jobs:
         uses: actions/cache@v4
         with:
           path: data/stonk.db
-          # Bump the v* prefix to invalidate the cache on schema changes.
-          key: stonk-db-v2-${{ github.run_id }}
+          # Cache invalidates automatically when migrations/ changes — any
+          # alembic file edit shifts the hash and forces a fresh DB on the
+          # next run, so future schema changes can't be silently ignored.
+          key: stonk-db-${{ hashFiles('migrations/**') }}-${{ github.run_id }}
           restore-keys: |
-            stonk-db-v2-
+            stonk-db-${{ hashFiles('migrations/**') }}-
 
       - name: Cache HuggingFace model
         uses: actions/cache@v4
@@ -79,7 +81,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: data/stonk.db
-          key: stonk-db-v2-${{ github.run_id }}
+          key: stonk-db-${{ hashFiles('migrations/**') }}-${{ github.run_id }}
 
       - name: Commit JSON snapshots
         run: |
