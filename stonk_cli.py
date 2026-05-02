@@ -88,8 +88,8 @@ def pipeline(score_limit: int) -> None:
 
     click.echo(f"news: {news_ingest()}")
     click.echo(f"scored: {process_pending(limit=score_limit)}")
-    sigs = evaluate_all()
-    click.echo(f"signals: {len(sigs)}")
+    n = evaluate_all()
+    click.echo(f"signals: {n}")
 
 
 def main() -> None:
