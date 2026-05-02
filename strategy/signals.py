@@ -28,8 +28,8 @@ log = logging.getLogger(__name__)
 WINDOW_MIN = 60
 HALF_LIFE_MIN = 30
 MIN_ARTICLES = 2
-BUY_THRESHOLD = 0.4
-SELL_THRESHOLD = -0.4
+BUY_THRESHOLD = 0.15
+SELL_THRESHOLD = -0.15
 
 
 @dataclass
@@ -101,6 +101,63 @@ def evaluate_all(now: datetime | None = None) -> list[Signal]:
                 emitted.append(sig)
                 log.info("Signal: %s %s strength=%+.3f", sig.ticker, sig.signal_type, sig.strength)
     return emitted
+
+
+def backfill_all(step_hours: int = 1) -> int:
+    """Walk historical sentiment for each ticker and emit signals at each step.
+
+    Without this, a single 'now' evaluation produces nothing to backtest against
+    when news arrives in batches (e.g., NewsAPI free tier with its 24h delay).
+    Emits a signal only when the signal *type* changes from the previous step,
+    avoiding redundant rows.
+    """
+    from sqlalchemy import func as sa_func
+
+    step = timedelta(hours=step_hours)
+    total = 0
+    with session_scope() as session:
+        for ticker in settings.ticker_list:
+            bounds = session.execute(
+                select(sa_func.min(Article.published_at), sa_func.max(Article.published_at))
+                .join(SentimentScore, SentimentScore.article_id == Article.id)
+                .where(SentimentScore.ticker == ticker)
+            ).one()
+            earliest, latest = bounds
+            if earliest is None or latest is None:
+                continue
+
+            t = earliest + timedelta(minutes=WINDOW_MIN)
+            last_type: str | None = None
+            ticker_count = 0
+            while t <= latest + step:
+                samples = _samples_for(session, ticker, t)
+                if not samples:
+                    t += step
+                    continue
+                strength = compute_strength(samples)
+                signal_type = classify(strength)
+                if signal_type != "HOLD" and signal_type != last_type:
+                    reason = (
+                        f"strength={strength:+.3f} over {len(samples)} articles "
+                        f"in {WINDOW_MIN}min window ending {t.isoformat()}"
+                    )
+                    session.add(
+                        Signal(
+                            ticker=ticker,
+                            timestamp=t,
+                            signal_type=signal_type,
+                            strength=strength,
+                            reason=reason,
+                        )
+                    )
+                    ticker_count += 1
+                    last_type = signal_type
+                elif signal_type == "HOLD":
+                    last_type = None
+                t += step
+            log.info("Backfilled %d signals for %s", ticker_count, ticker)
+            total += ticker_count
+    return total
 
 
 if __name__ == "__main__":

@@ -45,11 +45,21 @@ def score(limit: int) -> None:
 
 
 @cli.command("signals")
-def signals() -> None:
-    from strategy.signals import evaluate_all
+@click.option(
+    "--backfill", is_flag=True, help="Replay historical sentiment to emit signals at each timestamp"
+)
+@click.option("--step-hours", default=1, type=int, help="Step size for backfill")
+def signals(backfill: bool, step_hours: int) -> None:
+    if backfill:
+        from strategy.signals import backfill_all
 
-    sigs = evaluate_all()
-    click.echo(f"emitted {len(sigs)} signals")
+        n = backfill_all(step_hours=step_hours)
+        click.echo(f"backfilled {n} signals")
+    else:
+        from strategy.signals import evaluate_all
+
+        sigs = evaluate_all()
+        click.echo(f"emitted {len(sigs)} signals")
 
 
 @cli.command("backtest")
