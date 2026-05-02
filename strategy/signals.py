@@ -92,9 +92,15 @@ def classify(strength: float) -> str:
     return "HOLD"
 
 
+def _aware(dt: datetime) -> datetime:
+    """SQLite drops tzinfo on read; force UTC-aware so subtraction works."""
+    return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt.astimezone(timezone.utc)
+
+
 def _samples_for(session: Session, ticker: str, now: datetime) -> list[WindowSample]:
     """Sample window keyed by article publish time. Used by backfill_all to
     simulate what the engine would have said historically."""
+    now = _aware(now)
     since = now - timedelta(minutes=WINDOW_MIN)
     stmt = (
         select(SentimentScore.sentiment_score, SentimentScore.confidence, Article.published_at)
@@ -103,7 +109,7 @@ def _samples_for(session: Session, ticker: str, now: datetime) -> list[WindowSam
     )
     rows = session.execute(stmt).all()
     return [
-        WindowSample(score=r[0], confidence=r[1], age_min=(now - r[2]).total_seconds() / 60.0)
+        WindowSample(score=r[0], confidence=r[1], age_min=(now - _aware(r[2])).total_seconds() / 60.0)
         for r in rows
     ]
 
@@ -112,6 +118,7 @@ def _recent_score_samples(session: Session, ticker: str, now: datetime) -> list[
     """Sample window keyed by *score* creation time. Used by evaluate_ticker
     so that 'live' signals reflect the engine's most recent read regardless
     of how delayed the underlying news is (NewsAPI free tier: ~24h)."""
+    now = _aware(now)
     since = now - timedelta(minutes=WINDOW_MIN)
     stmt = (
         select(SentimentScore.sentiment_score, SentimentScore.confidence, SentimentScore.created_at)
@@ -119,7 +126,7 @@ def _recent_score_samples(session: Session, ticker: str, now: datetime) -> list[
     )
     rows = session.execute(stmt).all()
     return [
-        WindowSample(score=r[0], confidence=r[1], age_min=(now - r[2]).total_seconds() / 60.0)
+        WindowSample(score=r[0], confidence=r[1], age_min=(now - _aware(r[2])).total_seconds() / 60.0)
         for r in rows
     ]
 
@@ -182,6 +189,8 @@ def backfill_all(step_hours: int = 1) -> int:
             earliest, latest = bounds
             if earliest is None or latest is None:
                 continue
+            earliest = _aware(earliest)
+            latest = _aware(latest)
 
             t = earliest + timedelta(minutes=WINDOW_MIN)
             last_type: str | None = None
