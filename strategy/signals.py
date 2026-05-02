@@ -93,6 +93,8 @@ def classify(strength: float) -> str:
 
 
 def _samples_for(session: Session, ticker: str, now: datetime) -> list[WindowSample]:
+    """Sample window keyed by article publish time. Used by backfill_all to
+    simulate what the engine would have said historically."""
     since = now - timedelta(minutes=WINDOW_MIN)
     stmt = (
         select(SentimentScore.sentiment_score, SentimentScore.confidence, Article.published_at)
@@ -106,10 +108,26 @@ def _samples_for(session: Session, ticker: str, now: datetime) -> list[WindowSam
     ]
 
 
+def _recent_score_samples(session: Session, ticker: str, now: datetime) -> list[WindowSample]:
+    """Sample window keyed by *score* creation time. Used by evaluate_ticker
+    so that 'live' signals reflect the engine's most recent read regardless
+    of how delayed the underlying news is (NewsAPI free tier: ~24h)."""
+    since = now - timedelta(minutes=WINDOW_MIN)
+    stmt = (
+        select(SentimentScore.sentiment_score, SentimentScore.confidence, SentimentScore.created_at)
+        .where(SentimentScore.ticker == ticker, SentimentScore.created_at >= since, SentimentScore.created_at <= now)
+    )
+    rows = session.execute(stmt).all()
+    return [
+        WindowSample(score=r[0], confidence=r[1], age_min=(now - r[2]).total_seconds() / 60.0)
+        for r in rows
+    ]
+
+
 def evaluate_ticker(session: Session, ticker: str, now: datetime | None = None) -> tuple[str, float] | None:
     """Returns (signal_type, strength) of an emitted signal, or None if HOLD."""
     now = now or datetime.now(timezone.utc)
-    samples = _samples_for(session, ticker, now)
+    samples = _recent_score_samples(session, ticker, now)
     strength = compute_strength(samples)
     signal_type = classify(strength)
     if signal_type == "HOLD":
