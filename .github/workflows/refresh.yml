@@ -70,6 +70,11 @@ jobs:
       - name: Backfill signals
         run: stonk signals --backfill --step-hours 1
 
+      - name: Emit current signals
+        # Stamps one signal per ticker at "now" so the dashboard's
+        # 24h "Active Signals" view always reflects the latest state.
+        run: stonk signals
+
       - name: Run backtest
         run: stonk backtest
 

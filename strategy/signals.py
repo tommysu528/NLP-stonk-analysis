@@ -25,6 +25,38 @@ from config import settings
 
 log = logging.getLogger(__name__)
 
+
+def _insert(bind):
+    """Return the dialect-specific insert() with on_conflict_* support."""
+    if bind.dialect.name == "sqlite":
+        from sqlalchemy.dialects.sqlite import insert as _ins
+    else:
+        from sqlalchemy.dialects.postgresql import insert as _ins
+    return _ins
+
+
+def _upsert_signal(
+    session: Session,
+    *,
+    ticker: str,
+    timestamp: datetime,
+    signal_type: str,
+    strength: float,
+    reason: str | None,
+) -> bool:
+    """Insert a signal, ignoring duplicates on (ticker, timestamp, signal_type).
+    Returns True if a new row was inserted."""
+    insert = _insert(session.bind)
+    stmt = insert(Signal).values(
+        ticker=ticker,
+        timestamp=timestamp,
+        signal_type=signal_type,
+        strength=strength,
+        reason=reason,
+    ).on_conflict_do_nothing(index_elements=["ticker", "timestamp", "signal_type"])
+    result = session.execute(stmt)
+    return (result.rowcount or 0) > 0
+
 WINDOW_MIN = 60
 HALF_LIFE_MIN = 30
 MIN_ARTICLES = 2
@@ -74,7 +106,8 @@ def _samples_for(session: Session, ticker: str, now: datetime) -> list[WindowSam
     ]
 
 
-def evaluate_ticker(session: Session, ticker: str, now: datetime | None = None) -> Signal | None:
+def evaluate_ticker(session: Session, ticker: str, now: datetime | None = None) -> tuple[str, float] | None:
+    """Returns (signal_type, strength) of an emitted signal, or None if HOLD."""
     now = now or datetime.now(timezone.utc)
     samples = _samples_for(session, ticker, now)
     strength = compute_strength(samples)
@@ -85,21 +118,27 @@ def evaluate_ticker(session: Session, ticker: str, now: datetime | None = None) 
         f"strength={strength:+.3f} over {len(samples)} articles in last {WINDOW_MIN}min "
         f"(buy>={BUY_THRESHOLD}, sell<={SELL_THRESHOLD})"
     )
-    sig = Signal(ticker=ticker, timestamp=now, signal_type=signal_type, strength=strength, reason=reason)
-    session.add(sig)
-    return sig
+    inserted = _upsert_signal(
+        session,
+        ticker=ticker,
+        timestamp=now,
+        signal_type=signal_type,
+        strength=strength,
+        reason=reason,
+    )
+    return (signal_type, strength) if inserted else None
 
 
-def evaluate_all(now: datetime | None = None) -> list[Signal]:
-    """Evaluate every configured ticker once. Returns emitted signals."""
+def evaluate_all(now: datetime | None = None) -> int:
+    """Evaluate every configured ticker once. Returns number of signals emitted."""
     now = now or datetime.now(timezone.utc)
-    emitted: list[Signal] = []
+    emitted = 0
     with session_scope() as session:
         for ticker in settings.ticker_list:
-            sig = evaluate_ticker(session, ticker, now=now)
-            if sig is not None:
-                emitted.append(sig)
-                log.info("Signal: %s %s strength=%+.3f", sig.ticker, sig.signal_type, sig.strength)
+            result = evaluate_ticker(session, ticker, now=now)
+            if result is not None:
+                emitted += 1
+                log.info("Signal: %s %s strength=%+.3f", ticker, result[0], result[1])
     return emitted
 
 
@@ -141,16 +180,16 @@ def backfill_all(step_hours: int = 1) -> int:
                         f"strength={strength:+.3f} over {len(samples)} articles "
                         f"in {WINDOW_MIN}min window ending {t.isoformat()}"
                     )
-                    session.add(
-                        Signal(
-                            ticker=ticker,
-                            timestamp=t,
-                            signal_type=signal_type,
-                            strength=strength,
-                            reason=reason,
-                        )
+                    inserted = _upsert_signal(
+                        session,
+                        ticker=ticker,
+                        timestamp=t,
+                        signal_type=signal_type,
+                        strength=strength,
+                        reason=reason,
                     )
-                    ticker_count += 1
+                    if inserted:
+                        ticker_count += 1
                     last_type = signal_type
                 elif signal_type == "HOLD":
                     last_type = None
@@ -162,5 +201,5 @@ def backfill_all(step_hours: int = 1) -> int:
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-    sigs = evaluate_all()
-    print(f"emitted {len(sigs)} signals")
+    n = evaluate_all()
+    print(f"emitted {n} signals")

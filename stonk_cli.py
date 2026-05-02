@@ -58,8 +58,8 @@ def signals(backfill: bool, step_hours: int) -> None:
     else:
         from strategy.signals import evaluate_all
 
-        sigs = evaluate_all()
-        click.echo(f"emitted {len(sigs)} signals")
+        n = evaluate_all()
+        click.echo(f"emitted {n} signals")
 
 
 @cli.command("backtest")
