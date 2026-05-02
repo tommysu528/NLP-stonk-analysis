@@ -19,7 +19,7 @@ depends_on: str | Sequence[str] | None = None
 def upgrade() -> None:
     op.create_table(
         "articles",
-        sa.Column("id", sa.BigInteger(), primary_key=True),
+        sa.Column("id", sa.BigInteger().with_variant(sa.Integer(), "sqlite"), primary_key=True),
         sa.Column("ticker", sa.String(16), nullable=False),
         sa.Column("headline", sa.Text(), nullable=False),
         sa.Column("summary", sa.Text(), nullable=True),
@@ -33,10 +33,10 @@ def upgrade() -> None:
 
     op.create_table(
         "sentiment_scores",
-        sa.Column("id", sa.BigInteger(), primary_key=True),
+        sa.Column("id", sa.BigInteger().with_variant(sa.Integer(), "sqlite"), primary_key=True),
         sa.Column(
             "article_id",
-            sa.BigInteger(),
+            sa.BigInteger().with_variant(sa.Integer(), "sqlite"),
             sa.ForeignKey("articles.id", ondelete="CASCADE"),
             nullable=False,
         ),
@@ -53,21 +53,21 @@ def upgrade() -> None:
 
     op.create_table(
         "prices",
-        sa.Column("id", sa.BigInteger(), primary_key=True),
+        sa.Column("id", sa.BigInteger().with_variant(sa.Integer(), "sqlite"), primary_key=True),
         sa.Column("ticker", sa.String(16), nullable=False),
         sa.Column("timestamp", sa.DateTime(timezone=True), nullable=False),
         sa.Column("open", sa.Numeric(12, 4), nullable=False),
         sa.Column("high", sa.Numeric(12, 4), nullable=False),
         sa.Column("low", sa.Numeric(12, 4), nullable=False),
         sa.Column("close", sa.Numeric(12, 4), nullable=False),
-        sa.Column("volume", sa.BigInteger(), nullable=False),
+        sa.Column("volume", sa.BigInteger().with_variant(sa.Integer(), "sqlite"), nullable=False),
         sa.UniqueConstraint("ticker", "timestamp", name="uq_prices_ticker_ts"),
     )
     op.create_index("idx_prices_ticker_ts", "prices", ["ticker", sa.text("timestamp DESC")])
 
     op.create_table(
         "signals",
-        sa.Column("id", sa.BigInteger(), primary_key=True),
+        sa.Column("id", sa.BigInteger().with_variant(sa.Integer(), "sqlite"), primary_key=True),
         sa.Column("ticker", sa.String(16), nullable=False),
         sa.Column("timestamp", sa.DateTime(timezone=True), nullable=False),
         sa.Column("signal_type", sa.String(8), nullable=False),
@@ -78,7 +78,7 @@ def upgrade() -> None:
 
     op.create_table(
         "backtest_results",
-        sa.Column("id", sa.BigInteger(), primary_key=True),
+        sa.Column("id", sa.BigInteger().with_variant(sa.Integer(), "sqlite"), primary_key=True),
         sa.Column("strategy_name", sa.String(64), nullable=False),
         sa.Column("ticker", sa.String(16), nullable=False),
         sa.Column("start_date", sa.DateTime(timezone=True), nullable=False),
