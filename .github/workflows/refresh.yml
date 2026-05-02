@@ -1,0 +1,93 @@
+name: Refresh data
+
+on:
+  schedule:
+    # Every 3 hours. Adjust to fit NewsAPI free tier (100 req/day, 10 tickers/run).
+    - cron: "0 */3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DATABASE_URL: sqlite:///data/stonk.db
+      NEWSAPI_KEY: ${{ secrets.NEWSAPI_KEY }}
+      SENTIMENT_MODEL: ProsusAI/finbert
+      TICKERS: AAPL,MSFT,NVDA,TSLA,AMZN,META,GOOGL,AMD,NFLX,JPM
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Restore SQLite snapshot
+        id: db-cache
+        uses: actions/cache@v4
+        with:
+          path: data/stonk.db
+          key: stonk-db-${{ github.run_id }}
+          restore-keys: |
+            stonk-db-
+
+      - name: Cache HuggingFace model
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-${{ env.SENTIMENT_MODEL }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install --index-url https://download.pytorch.org/whl/cpu torch
+          pip install -e .
+
+      - name: Init data directory
+        run: mkdir -p data
+
+      - name: Run migrations
+        run: alembic upgrade head
+
+      - name: Fetch prices
+        run: stonk fetch-prices --period 60d --interval 1h
+        continue-on-error: true
+
+      - name: Fetch news + score sentiment
+        run: stonk pipeline
+
+      - name: Backfill signals
+        run: stonk signals --backfill --step-hours 1
+
+      - name: Run backtest
+        run: stonk backtest
+
+      - name: Export JSON snapshots
+        run: stonk export
+
+      - name: Save SQLite snapshot
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: data/stonk.db
+          key: stonk-db-${{ github.run_id }}
+
+      - name: Commit JSON snapshots
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add frontend/public/data
+          if git diff --staged --quiet; then
+            echo "No data changes to commit."
+          else
+            git commit -m "chore(data): refresh snapshot $(date -u +%Y-%m-%dT%H:%MZ)"
+            git push
+          fi

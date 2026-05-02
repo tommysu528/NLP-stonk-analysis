@@ -14,6 +14,7 @@ COPY nlp/ ./nlp/
 COPY strategy/ ./strategy/
 COPY config/ ./config/
 COPY migrations/ ./migrations/
+COPY scripts/ ./scripts/
 COPY alembic.ini ./
 COPY stonk_cli.py ./
 

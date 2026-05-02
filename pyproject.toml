@@ -40,7 +40,7 @@ stonk = "stonk_cli:main"
 py-modules = ["stonk_cli"]
 
 [tool.setuptools.packages.find]
-include = ["api*", "ingestion*", "nlp*", "strategy*", "config*"]
+include = ["api*", "ingestion*", "nlp*", "strategy*", "config*", "scripts*"]
 exclude = ["frontend*", "tests*", "migrations*"]
 
 [tool.ruff]

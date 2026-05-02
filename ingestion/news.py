@@ -11,13 +11,22 @@ import logging
 from datetime import datetime, timezone
 
 import httpx
-from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from api.db import session_scope
 from api.models import Article
 from config import settings
+
+
+def _insert(bind):
+    """Return the dialect-specific insert() with on_conflict_* support."""
+    name = bind.dialect.name
+    if name == "sqlite":
+        from sqlalchemy.dialects.sqlite import insert as _ins
+    else:
+        from sqlalchemy.dialects.postgresql import insert as _ins
+    return _ins
 
 log = logging.getLogger(__name__)
 
@@ -87,6 +96,7 @@ def _to_row(ticker: str, article: dict) -> dict | None:
 def upsert_articles(session: Session, rows: list[dict]) -> int:
     if not rows:
         return 0
+    insert = _insert(session.bind)
     stmt = insert(Article).values(rows)
     stmt = stmt.on_conflict_do_nothing(index_elements=["url", "ticker"])
     result = session.execute(stmt)

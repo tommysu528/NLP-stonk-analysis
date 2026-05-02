@@ -81,8 +81,52 @@ cd frontend && npm install && npm run dev
 | `stonk fetch-news` | Poll NewsAPI per ticker, upsert into `articles` |
 | `stonk score` | Run FinBERT on pending articles, write `sentiment_scores` |
 | `stonk signals` | Evaluate the signal engine, write `signals` rows |
+| `stonk signals --backfill` | Walk historical sentiment and emit signals at each step (idempotent for type changes) |
 | `stonk backtest` | Run the full backtest matrix, write `backtest_results` |
+| `stonk export` | Dump all tables to JSON snapshots in `frontend/public/data/` |
 | `stonk pipeline` | `fetch-news` + `score` + `signals` end-to-end |
+
+## Public deployment (GitHub Pages + Actions)
+
+This repo is set up to host itself on GitHub Pages with no external infrastructure:
+
+- **`.github/workflows/refresh.yml`** runs every 3 hours. It installs the pipeline,
+  fetches news, scores sentiment with FinBERT, generates signals, runs the backtest,
+  exports JSON snapshots into `frontend/public/data/`, and commits them back to the repo.
+  SQLite acts as the persistent store, cached between runs via `actions/cache`.
+- **`.github/workflows/deploy.yml`** rebuilds the React app with `VITE_STATIC_MODE=true`
+  (so it reads from the JSON snapshots instead of FastAPI) and publishes it to Pages.
+  It runs on push to `main` and after every refresh.
+
+### One-time setup
+
+1. **Add your NewsAPI key as a repo secret.** Settings → Secrets and variables →
+   Actions → New repository secret: name `NEWSAPI_KEY`, value your key.
+2. **Allow Actions to write to the repo.** Settings → Actions → General →
+   Workflow permissions → "Read and write permissions" → Save.
+3. **Enable GitHub Pages with Actions as the source.** Settings → Pages →
+   Build and deployment → Source: GitHub Actions.
+4. **Trigger the first refresh manually.** Actions tab → "Refresh data" →
+   Run workflow → main. The first run takes ~5 minutes (downloads FinBERT,
+   pulls news, runs backtest). Subsequent runs are ~2 minutes.
+5. After refresh completes, deploy will trigger automatically. Your dashboard
+   will be live at `https://<your-username>.github.io/NLP-stonk-analysis/`.
+
+### What this gives you
+
+- A public dashboard auto-updating every 3 hours, free.
+- Real accumulating dataset: each refresh adds new articles and signals to
+  the SQLite store, with the JSON snapshots that the dashboard reads being
+  committed to the repo as a side effect.
+- No always-on server, no database to manage, no credit card required.
+
+### What this does **not** give you
+
+- Sub-3-hour latency on signals (NewsAPI free tier is 24h-delayed anyway).
+- Server-side filtering or pagination — the frontend pulls full JSON files
+  and filters client-side. Fine for the current 10-ticker scope; would need
+  rethinking past ~100 tickers or ~10k articles.
+- Personal data, auth, or write actions from the UI.
 
 ## Documentation
 

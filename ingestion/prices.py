@@ -5,12 +5,21 @@ import logging
 from datetime import datetime
 
 import yfinance as yf
-from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from api.db import session_scope
 from api.models import Price
 from config import settings
+
+
+def _insert(bind):
+    """Return the dialect-specific insert() with on_conflict_* support."""
+    name = bind.dialect.name
+    if name == "sqlite":
+        from sqlalchemy.dialects.sqlite import insert as _ins
+    else:
+        from sqlalchemy.dialects.postgresql import insert as _ins
+    return _ins
 
 log = logging.getLogger(__name__)
 
@@ -45,6 +54,7 @@ def fetch_ticker(ticker: str, period: str = "2y", interval: str = "1d") -> list[
 def upsert_prices(session: Session, rows: list[dict]) -> int:
     if not rows:
         return 0
+    insert = _insert(session.bind)
     stmt = insert(Price).values(rows)
     stmt = stmt.on_conflict_do_update(
         index_elements=["ticker", "timestamp"],

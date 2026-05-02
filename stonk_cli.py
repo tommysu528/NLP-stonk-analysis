@@ -70,6 +70,14 @@ def backtest() -> None:
     click.echo(summary)
 
 
+@cli.command("export")
+def export() -> None:
+    """Export DB tables to JSON snapshots in frontend/public/data."""
+    from scripts.export_snapshots import export as do_export
+
+    do_export()
+
+
 @cli.command("pipeline")
 @click.option("--score-limit", default=200, type=int)
 def pipeline(score_limit: int) -> None:
