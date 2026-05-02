@@ -35,9 +35,10 @@ jobs:
         uses: actions/cache@v4
         with:
           path: data/stonk.db
-          key: stonk-db-${{ github.run_id }}
+          # Bump the v* prefix to invalidate the cache on schema changes.
+          key: stonk-db-v2-${{ github.run_id }}
           restore-keys: |
-            stonk-db-
+            stonk-db-v2-
 
       - name: Cache HuggingFace model
         uses: actions/cache@v4
@@ -78,7 +79,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: data/stonk.db
-          key: stonk-db-${{ github.run_id }}
+          key: stonk-db-v2-${{ github.run_id }}
 
       - name: Commit JSON snapshots
         run: |
