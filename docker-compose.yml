@@ -1,0 +1,51 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: stonk
+      POSTGRES_PASSWORD: stonk
+      POSTGRES_DB: stonk
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U stonk"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL: postgresql+psycopg://stonk:stonk@db:5432/stonk
+      NEWSAPI_KEY: ${NEWSAPI_KEY}
+      SENTIMENT_MODEL: ${SENTIMENT_MODEL:-ProsusAI/finbert}
+      TICKERS: ${TICKERS:-AAPL,MSFT,NVDA,TSLA,AMZN,META,GOOGL,AMD,NFLX,JPM}
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    volumes:
+      - hf_cache:/root/.cache/huggingface
+    command: ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+
+  frontend:
+    image: node:20-alpine
+    working_dir: /app
+    environment:
+      VITE_API_URL: http://api:8000
+    volumes:
+      - ./frontend:/app
+    ports:
+      - "5173:5173"
+    command: ["sh", "-c", "npm install && npm run dev -- --host 0.0.0.0"]
+    depends_on:
+      - api
+
+volumes:
+  pgdata:
+  hf_cache:
