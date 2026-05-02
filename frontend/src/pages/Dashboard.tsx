@@ -1,105 +1,305 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
+import { useQueries, useQuery } from "@tanstack/react-query";
 import { api } from "../api";
 import { TICKERS } from "../types";
+import type { Article, SentimentScore } from "../types";
+import { ArrowDown, ArrowUp, Bolt, Minus, Newspaper } from "../icons";
+import { avg, fmtPct, fmtScore, formatTime, sentimentBucket, timeAgo } from "../utils";
 
-function sentimentColor(score: number): string {
-  if (score > 0.2) return "#1f7a1f";
-  if (score > 0.05) return "#7fb87f";
-  if (score < -0.2) return "#a51212";
-  if (score < -0.05) return "#d97777";
-  return "#888";
+interface TickerStats {
+  ticker: string;
+  scores: SentimentScore[];
+  avgScore: number;
+  count: number;
+  bucket: "bullish" | "neutral" | "bearish";
+  priceChangePct: number | null;
 }
 
-function HeatmapRow({ ticker }: { ticker: string }) {
-  const { data: scores = [] } = useQuery({
-    queryKey: ["sentiment", ticker],
-    queryFn: () => api.sentiment({ ticker, limit: 50 }),
+function useTickerStats(): { stats: TickerStats[]; allSentiment: SentimentScore[]; lastSync: number } {
+  const sentimentQueries = useQueries({
+    queries: TICKERS.map((ticker) => ({
+      queryKey: ["sentiment", ticker],
+      queryFn: () => api.sentiment({ ticker, limit: 50 }),
+    })),
   });
-  const avg =
-    scores.length === 0
-      ? 0
-      : scores.reduce((s, x) => s + x.sentiment_score, 0) / scores.length;
+  const priceQueries = useQueries({
+    queries: TICKERS.map((ticker) => ({
+      queryKey: ["prices-recent", ticker],
+      queryFn: () => api.prices({ ticker, limit: 200 }),
+    })),
+  });
+
+  const lastSync = Math.max(
+    0,
+    ...sentimentQueries.map((q) => q.dataUpdatedAt),
+    ...priceQueries.map((q) => q.dataUpdatedAt)
+  );
+
+  const allSentiment = sentimentQueries.flatMap((q) => q.data ?? []);
+
+  const stats: TickerStats[] = TICKERS.map((ticker, idx) => {
+    const scores = sentimentQueries[idx].data ?? [];
+    const prices = priceQueries[idx].data ?? [];
+    const avgScore = avg(scores.map((s) => s.sentiment_score));
+    const count = scores.length;
+
+    let priceChangePct: number | null = null;
+    if (prices.length >= 2) {
+      const last = prices[prices.length - 1].close;
+      // 24h ago: pick the bar closest to 24h before the latest, or the bar 24 entries back for hourly
+      const lookback = Math.min(24, prices.length - 1);
+      const prev = prices[prices.length - 1 - lookback].close;
+      if (prev > 0) priceChangePct = (last - prev) / prev;
+    }
+
+    return {
+      ticker,
+      scores,
+      avgScore,
+      count,
+      bucket: sentimentBucket(avgScore),
+      priceChangePct,
+    };
+  });
+
+  return { stats, allSentiment, lastSync };
+}
+
+function HeatmapTile({ s }: { s: TickerStats }) {
+  const Arrow = s.priceChangePct == null ? Minus : s.priceChangePct > 0 ? ArrowUp : s.priceChangePct < 0 ? ArrowDown : Minus;
+  const arrowClass = s.priceChangePct == null ? "" : s.priceChangePct > 0 ? "up" : s.priceChangePct < 0 ? "down" : "";
+  const changeClass = s.priceChangePct == null ? "" : s.priceChangePct > 0 ? "pos" : "neg";
   return (
-    <Link to={`/ticker/${ticker}`} className="heatmap-cell" style={{ background: sentimentColor(avg) }}>
-      <div className="ticker-symbol">{ticker}</div>
-      <div className="ticker-score">{scores.length > 0 ? avg.toFixed(2) : "—"}</div>
-      <div className="ticker-count">{scores.length} articles</div>
+    <Link to={`/ticker/${s.ticker}`} className={`heatmap-tile ${s.bucket}`}>
+      <div className="heatmap-tile-top">
+        <span className="heatmap-tile-ticker">{s.ticker}</span>
+        <span className={`heatmap-tile-arrow ${arrowClass}`}><Arrow size={14} /></span>
+      </div>
+      <div className={`heatmap-tile-score ${s.bucket}`}>
+        {s.count > 0 ? fmtScore(s.avgScore) : "—"}
+      </div>
+      <div className="heatmap-tile-bottom">
+        <span>{s.count} articles</span>
+        <span className={`change ${changeClass}`}>
+          {s.priceChangePct == null ? "—" : fmtPct(s.priceChangePct)}
+        </span>
+      </div>
     </Link>
   );
 }
 
-export default function Dashboard() {
-  const { data: latestArticles = [] } = useQuery({
-    queryKey: ["articles-latest"],
-    queryFn: () => api.articles({ limit: 20 }),
-  });
-  const { data: activeSignals = [] } = useQuery({
+function ActiveSignalsCard() {
+  const { data: signals = [] } = useQuery({
     queryKey: ["signals-active"],
-    queryFn: () => api.signals({ active: true, limit: 50 }),
+    queryFn: () => api.signals({ active: true, limit: 10 }),
   });
 
   return (
-    <div className="dashboard">
-      <section>
-        <h2>Sentiment heatmap (last 50 scores per ticker)</h2>
-        <div className="heatmap">
-          {TICKERS.map((t) => (
-            <HeatmapRow key={t} ticker={t} />
+    <div className="card">
+      <div className="card-header">
+        <h3 className="card-title">
+          <span style={{ color: "var(--amber)", display: "flex" }}><Bolt size={14} /></span>
+          Active Signals
+          <span className="tag" style={{ marginLeft: 4 }}>24H</span>
+        </h3>
+        <span className="card-meta">{signals.length} active</span>
+      </div>
+      {signals.length === 0 ? (
+        <div className="empty-state">No active signals in the last 24h.</div>
+      ) : (
+        signals.map((s) => {
+          const Arrow = s.signal_type === "BUY" ? ArrowUp : ArrowDown;
+          const cls = s.signal_type === "BUY" ? "buy" : "sell";
+          const conf = Math.min(99, Math.round(Math.abs(s.strength) * 100 + 50));
+          return (
+            <Link key={s.id} to={`/ticker/${s.ticker}`} className="signal-row" style={{ color: "inherit" }}>
+              <div className={`signal-icon ${cls}`}><Arrow size={16} /></div>
+              <div className="signal-body">
+                <div className="signal-line1">
+                  <span className="signal-ticker">{s.ticker}</span>
+                  <span className={`pill ${cls}`}>{s.signal_type}</span>
+                  <span className="signal-ago">· {timeAgo(s.timestamp)}</span>
+                </div>
+                <div className="signal-reason">{s.reason}</div>
+              </div>
+              <div className="signal-conf">
+                <div className="signal-conf-value">{conf}%</div>
+                <div className="signal-conf-label">conf.</div>
+              </div>
+            </Link>
+          );
+        })
+      )}
+    </div>
+  );
+}
+
+type NewsFilter = "all" | "bullish" | "bearish";
+
+function LatestNewsCard({ allSentiment }: { allSentiment: SentimentScore[] }) {
+  const [filter, setFilter] = useState<NewsFilter>("all");
+  const { data: articles = [] } = useQuery({
+    queryKey: ["articles-latest"],
+    queryFn: () => api.articles({ limit: 30 }),
+  });
+
+  const sentimentByArticle = useMemo(() => {
+    const map = new Map<number, SentimentScore>();
+    for (const s of allSentiment) {
+      const existing = map.get(s.article_id);
+      if (!existing || Math.abs(s.sentiment_score) > Math.abs(existing.sentiment_score)) {
+        map.set(s.article_id, s);
+      }
+    }
+    return map;
+  }, [allSentiment]);
+
+  const enriched = useMemo(() => {
+    return articles
+      .map((a) => ({ article: a, sentiment: sentimentByArticle.get(a.id) }))
+      .filter(({ sentiment }) => {
+        if (filter === "all") return true;
+        if (!sentiment) return false;
+        if (filter === "bullish") return sentiment.sentiment_score > 0.05;
+        if (filter === "bearish") return sentiment.sentiment_score < -0.05;
+        return true;
+      });
+  }, [articles, sentimentByArticle, filter]);
+
+  return (
+    <div className="card">
+      <div className="card-header">
+        <h3 className="card-title">
+          <span style={{ color: "var(--text-muted)", display: "flex" }}><Newspaper size={14} /></span>
+          Latest News
+        </h3>
+        <div className="filter-pills">
+          {(["all", "bullish", "bearish"] as NewsFilter[]).map((f) => (
+            <button
+              key={f}
+              className={`filter-pill ${filter === f ? "active" : ""}`}
+              onClick={() => setFilter(f)}
+            >
+              {f.charAt(0).toUpperCase() + f.slice(1)}
+            </button>
           ))}
         </div>
-      </section>
-
-      <section>
-        <h2>Active signals (last 24h)</h2>
-        {activeSignals.length === 0 ? (
-          <p className="muted">No active signals.</p>
-        ) : (
-          <table>
-            <thead>
-              <tr>
-                <th>Ticker</th>
-                <th>Type</th>
-                <th>Strength</th>
-                <th>When</th>
-                <th>Reason</th>
-              </tr>
-            </thead>
-            <tbody>
-              {activeSignals.map((s) => (
-                <tr key={s.id}>
-                  <td>
-                    <Link to={`/ticker/${s.ticker}`}>{s.ticker}</Link>
-                  </td>
-                  <td className={`sig-${s.signal_type.toLowerCase()}`}>{s.signal_type}</td>
-                  <td>{s.strength.toFixed(3)}</td>
-                  <td>{new Date(s.timestamp).toLocaleString()}</td>
-                  <td className="muted">{s.reason}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </section>
-
-      <section>
-        <h2>Latest news</h2>
-        <ul className="article-list">
-          {latestArticles.map((a) => (
-            <li key={a.id}>
-              <Link to={`/ticker/${a.ticker}`} className="ticker-tag">
-                {a.ticker}
-              </Link>
-              <a href={a.url} target="_blank" rel="noreferrer">
-                {a.headline}
-              </a>
-              <span className="muted">
-                {a.source} · {new Date(a.published_at).toLocaleString()}
-              </span>
-            </li>
-          ))}
-        </ul>
-      </section>
+      </div>
+      {enriched.length === 0 ? (
+        <div className="empty-state">No news matches the current filter.</div>
+      ) : (
+        enriched.slice(0, 12).map(({ article, sentiment }) => (
+          <NewsRow key={article.id} article={article} sentiment={sentiment} />
+        ))
+      )}
     </div>
+  );
+}
+
+function NewsRow({ article, sentiment }: { article: Article; sentiment?: SentimentScore }) {
+  const bucket = sentiment ? sentimentBucket(sentiment.sentiment_score) : "neutral";
+  const score = sentiment?.sentiment_score ?? 0;
+  const fillHeight = Math.min(100, Math.abs(score) * 100 + 15);
+  return (
+    <div className="news-row">
+      <Link to={`/ticker/${article.ticker}`} className="tag news-tag">{article.ticker}</Link>
+      <div className="news-body">
+        <a className="news-headline" href={article.url} target="_blank" rel="noreferrer">
+          {article.headline}
+        </a>
+        <div className="news-meta">
+          <span className="news-source">{article.source ?? "Unknown"}</span>
+          <span>·</span>
+          <span>{timeAgo(article.published_at)}</span>
+        </div>
+      </div>
+      <div className="news-sentiment">
+        <div className="sentiment-bar" title={`Sentiment ${fmtScore(score)}`}>
+          <div className={`sentiment-bar-fill ${bucket}`} style={{ height: `${fillHeight}%` }} />
+        </div>
+        <span className={`news-score text-${bucket === "bullish" ? "pos" : bucket === "bearish" ? "neg" : "neutral"}`}>
+          {sentiment ? fmtScore(score) : "—"}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+export default function Dashboard() {
+  const { stats, allSentiment, lastSync } = useTickerStats();
+
+  const allScores = stats.flatMap((s) => s.scores.map((x) => x.sentiment_score));
+  const marketSentiment = avg(allScores);
+  const marketBucket = sentimentBucket(marketSentiment);
+  const articlesTracked = allSentiment.length > 0
+    ? new Set(allSentiment.map((s) => s.article_id)).size
+    : 0;
+  const bullishCount = stats.filter((s) => s.bucket === "bullish").length;
+  const bearishCount = stats.filter((s) => s.bucket === "bearish").length;
+
+  return (
+    <>
+      <div className="page-header">
+        <div>
+          <h1 className="page-title">Sentiment Dashboard</h1>
+          <p className="page-subtitle">Real-time NLP signals across your watchlist · updated continuously</p>
+        </div>
+        {lastSync > 0 && (
+          <div className="last-sync">
+            LAST SYNC <span className="last-sync-time">{formatTime(lastSync)}</span>
+          </div>
+        )}
+      </div>
+
+      <div className="kpi-row">
+        <div className="kpi">
+          <div className="kpi-label">Market Sentiment</div>
+          <div className={`kpi-value text-${marketBucket === "bullish" ? "pos" : marketBucket === "bearish" ? "neg" : "neutral"}`}>
+            {fmtScore(marketSentiment, 3)}
+          </div>
+          <div className="kpi-sub">
+            {marketBucket === "bullish" ? "Net Bullish" : marketBucket === "bearish" ? "Net Bearish" : "Neutral"}
+          </div>
+        </div>
+        <div className="kpi">
+          <div className="kpi-label">Articles Tracked</div>
+          <div className="kpi-value">{articlesTracked}</div>
+          <div className="kpi-sub">across {TICKERS.length} tickers</div>
+        </div>
+        <div className="kpi">
+          <div className="kpi-label">Bullish Tickers</div>
+          <div className="kpi-value text-pos">{bullishCount}/{TICKERS.length}</div>
+          <div className="kpi-sub">score &gt; +0.05</div>
+        </div>
+        <div className="kpi">
+          <div className="kpi-label">Bearish Tickers</div>
+          <div className="kpi-value text-neg">{bearishCount}/{TICKERS.length}</div>
+          <div className="kpi-sub">score &lt; -0.05</div>
+        </div>
+      </div>
+
+      <div className="card heatmap-card">
+        <div className="card-header">
+          <div>
+            <h3 className="card-title">Sentiment Heatmap</h3>
+            <p className="card-subtitle">Aggregate score · last 50 articles per ticker</p>
+          </div>
+          <div className="legend">
+            <span className="legend-item"><span className="legend-dot bearish" /> Bearish</span>
+            <span className="legend-item"><span className="legend-dot neutral" /> Neutral</span>
+            <span className="legend-item"><span className="legend-dot bullish" /> Bullish</span>
+          </div>
+        </div>
+        <div className="heatmap">
+          {stats.map((s) => <HeatmapTile key={s.ticker} s={s} />)}
+        </div>
+      </div>
+
+      <div className="two-col">
+        <ActiveSignalsCard />
+        <LatestNewsCard allSentiment={allSentiment} />
+      </div>
+    </>
   );
 }
