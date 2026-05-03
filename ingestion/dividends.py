@@ -15,7 +15,22 @@ import yfinance as yf
 
 log = logging.getLogger(__name__)
 
-DIVIDEND_TICKERS: list[str] = ["BTI", "MO", "T", "MAIN", "O", "VZ"]
+DIVIDEND_TICKERS: list[str] = [
+    # User-requested
+    "WU",    # Western Union — historically ~8-9%
+    "UPS",   # United Parcel Service — ~6-7% post price drop
+    # Tobacco / telecom — classic high-yielders
+    "BTI",   # British American Tobacco
+    "MO",    # Altria
+    "T",     # AT&T
+    "VZ",    # Verizon
+    # REITs / BDCs — actually-high-yield income vehicles
+    "O",     # Realty Income
+    "MAIN",  # Main Street Capital (BDC)
+    "ARCC",  # Ares Capital (BDC) — typically ~9%
+    "AGNC",  # AGNC Investment (mortgage REIT) — typically 13%+, cut history
+    "OHI",   # Omega Healthcare (healthcare REIT) — typically 7-8%
+]
 
 OUT_PATH = Path("frontend/public/data/dividends.json")
 
@@ -89,8 +104,14 @@ def fetch_all() -> list[dict]:
     rows = []
     for ticker in DIVIDEND_TICKERS:
         r = fetch_one(ticker)
-        if r is not None:
-            rows.append(r)
+        if r is None:
+            continue
+        # Skip tickers where yfinance returned nothing useful (likely 404 /
+        # symbol change). Better to omit than render an empty row.
+        if r.get("price") is None and r.get("dividend_yield") is None:
+            log.warning("Skipping %s — no price or yield data", ticker)
+            continue
+        rows.append(r)
     return rows
 
 
