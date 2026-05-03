@@ -155,9 +155,33 @@ function LatestNewsCard({ allSentiment }: { allSentiment: SentimentScore[] }) {
     return map;
   }, [allSentiment]);
 
+  // Articles are stored one row per (article, ticker) pair, so a piece of
+  // news mentioning multiple tickers shows up multiple times. Dedupe by URL
+  // (more reliable than headline) and aggregate every ticker that matched.
+  const deduped = useMemo(() => {
+    const groups = new Map<string, { article: Article; tickers: string[] }>();
+    for (const a of articles) {
+      const key = a.url;
+      const existing = groups.get(key);
+      if (existing) {
+        if (!existing.tickers.includes(a.ticker)) existing.tickers.push(a.ticker);
+      } else {
+        groups.set(key, { article: a, tickers: [a.ticker] });
+      }
+    }
+    return [...groups.values()].sort(
+      (a, b) =>
+        new Date(b.article.published_at).getTime() - new Date(a.article.published_at).getTime()
+    );
+  }, [articles]);
+
   const enriched = useMemo(() => {
-    return articles
-      .map((a) => ({ article: a, sentiment: sentimentByArticle.get(a.id) }))
+    return deduped
+      .map(({ article, tickers }) => ({
+        article,
+        tickers,
+        sentiment: sentimentByArticle.get(article.id),
+      }))
       .filter(({ sentiment }) => {
         if (filter === "all") return true;
         if (!sentiment) return false;
@@ -165,7 +189,7 @@ function LatestNewsCard({ allSentiment }: { allSentiment: SentimentScore[] }) {
         if (filter === "bearish") return sentiment.sentiment_score < -0.05;
         return true;
       });
-  }, [articles, sentimentByArticle, filter]);
+  }, [deduped, sentimentByArticle, filter]);
 
   return (
     <div className="card">
@@ -189,21 +213,33 @@ function LatestNewsCard({ allSentiment }: { allSentiment: SentimentScore[] }) {
       {enriched.length === 0 ? (
         <div className="empty-state">No news matches the current filter.</div>
       ) : (
-        enriched.slice(0, 12).map(({ article, sentiment }) => (
-          <NewsRow key={article.id} article={article} sentiment={sentiment} />
+        enriched.slice(0, 12).map(({ article, tickers, sentiment }) => (
+          <NewsRow key={article.url} article={article} tickers={tickers} sentiment={sentiment} />
         ))
       )}
     </div>
   );
 }
 
-function NewsRow({ article, sentiment }: { article: Article; sentiment?: SentimentScore }) {
+function NewsRow({
+  article,
+  tickers,
+  sentiment,
+}: {
+  article: Article;
+  tickers: string[];
+  sentiment?: SentimentScore;
+}) {
   const bucket = sentiment ? sentimentBucket(sentiment.sentiment_score) : "neutral";
   const score = sentiment?.sentiment_score ?? 0;
   const fillHeight = Math.min(100, Math.abs(score) * 100 + 15);
   return (
     <div className="news-row">
-      <Link to={`/ticker/${article.ticker}`} className="tag news-tag">{article.ticker}</Link>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 4, flexShrink: 0, marginTop: 2 }}>
+        {tickers.map((t) => (
+          <Link key={t} to={`/ticker/${t}`} className="tag news-tag">{t}</Link>
+        ))}
+      </div>
       <div className="news-body">
         <a className="news-headline" href={article.url} target="_blank" rel="noreferrer">
           {article.headline}
