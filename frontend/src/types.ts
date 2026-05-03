@@ -75,3 +75,69 @@ export interface DividendsPayload {
   updated_at: string;
   tickers: DividendTicker[];
 }
+
+export interface EarningsRow {
+  ticker: string;
+  next_earnings_date: string | null;
+  earnings_average_estimate: number | null;
+  earnings_low_estimate: number | null;
+  earnings_high_estimate: number | null;
+  revenue_average_estimate: number | null;
+  ex_dividend_date: string | null;
+  dividend_date: string | null;
+}
+
+export interface EarningsPayload {
+  updated_at: string;
+  tickers: EarningsRow[];
+}
+
+export interface TradingAccount {
+  equity: number;
+  cash: number;
+  buying_power: number;
+  portfolio_value: number;
+  long_market_value: number;
+  last_equity: number;
+  status: string;
+}
+
+export interface TradingPosition {
+  symbol: string;
+  qty: number;
+  avg_entry_price: number;
+  current_price: number | null;
+  market_value: number;
+  unrealized_pl: number;
+  unrealized_plpc: number;
+  side: string;
+}
+
+export interface TradingOrder {
+  id: string;
+  client_order_id: string;
+  symbol: string;
+  side: "buy" | "sell" | string;
+  qty: number | null;
+  notional: number | null;
+  filled_qty: number;
+  filled_avg_price: number | null;
+  status: string;
+  submitted_at: string | null;
+  filled_at: string | null;
+}
+
+export interface EquityPoint {
+  timestamp: number;
+  equity: number;
+}
+
+export interface TradingPayload {
+  enabled: boolean;
+  paper?: boolean;
+  updated_at: string;
+  account?: TradingAccount | null;
+  positions?: TradingPosition[];
+  recent_orders?: TradingOrder[];
+  equity_curve?: EquityPoint[];
+}

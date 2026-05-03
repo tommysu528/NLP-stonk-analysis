@@ -25,6 +25,30 @@ function compare(a: DividendTicker, b: DividendTicker, key: SortKey): number {
   return bv - av;
 }
 
+// REIT and BDC payout ratios are typically >100% because they distribute
+// FFO/NII rather than GAAP net income. Don't flag those as traps.
+const REIT_BDC_INDUSTRIES = new Set([
+  "REIT",
+  "Real Estate",
+  "REIT - Diversified",
+  "REIT - Healthcare Facilities",
+  "REIT - Mortgage",
+  "REIT - Retail",
+  "REIT - Residential",
+  "Asset Management",
+  "Credit Services",
+]);
+
+function isYieldTrap(t: DividendTicker): boolean {
+  if (t.payout_ratio == null || t.payout_ratio <= 1.0) return false;
+  const industry = t.industry || "";
+  const sector = t.sector || "";
+  if (sector === "Real Estate") return false;
+  if (sector === "Financial Services" && /BDC|Capital|Mortgage/i.test(industry)) return false;
+  if ([...REIT_BDC_INDUSTRIES].some((p) => industry.includes(p))) return false;
+  return true;
+}
+
 export default function DividendMaxxing() {
   const { data, isLoading, dataUpdatedAt } = useQuery({
     queryKey: ["dividends"],
@@ -137,9 +161,18 @@ export default function DividendMaxxing() {
                 const changeClass =
                   r.change_pct_1d == null ? "text-neutral" : r.change_pct_1d > 0 ? "text-pos" : "text-neg";
                 const fiveYrPct = r.five_year_avg_yield != null ? r.five_year_avg_yield / 100 : null;
+                const trap = isYieldTrap(r);
                 return (
                   <tr key={r.ticker}>
-                    <td className="mono" style={{ fontWeight: 600 }}>{r.ticker}</td>
+                    <td className="mono" style={{ fontWeight: 600 }}>
+                      {r.ticker}
+                      {trap && (
+                        <span
+                          title="Yield trap: payout > 100% and not a REIT/BDC. Dividend may be at risk."
+                          style={{ marginLeft: 6, color: "var(--amber)" }}
+                        >⚠</span>
+                      )}
+                    </td>
                     <td style={{ maxWidth: 220 }}>{r.name}</td>
                     <td className="text-neutral" style={{ fontSize: 12 }}>{r.sector ?? "—"}</td>
                     <td className="mono" style={{ textAlign: "right" }}>
@@ -160,7 +193,7 @@ export default function DividendMaxxing() {
                     <td className="mono" style={{ textAlign: "right" }}>
                       {r.dividend_rate != null ? `$${r.dividend_rate.toFixed(2)}` : "—"}
                     </td>
-                    <td className="mono" style={{ textAlign: "right" }}>
+                    <td className={`mono ${trap ? "text-neg" : ""}`} style={{ textAlign: "right" }}>
                       {r.payout_ratio != null ? fmtPct(r.payout_ratio, 0) : "—"}
                     </td>
                     <td className="text-neutral">{fmtDate(r.ex_dividend_date)}</td>

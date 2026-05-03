@@ -1,4 +1,4 @@
-import type { Article, BacktestResult, DividendsPayload, Price, SentimentScore, Signal } from "./types";
+import type { Article, BacktestResult, DividendsPayload, EarningsPayload, Price, SentimentScore, Signal, TradingPayload } from "./types";
 
 const STATIC = import.meta.env.VITE_STATIC_MODE === "true";
 const BASE = import.meta.env.BASE_URL || "/";
@@ -73,6 +73,14 @@ async function staticDividends(): Promise<DividendsPayload> {
   return cached("dividends", () => get<DividendsPayload>(`${DATA_BASE}/dividends.json`));
 }
 
+async function staticEarnings(): Promise<EarningsPayload> {
+  return cached("earnings", () => get<EarningsPayload>(`${DATA_BASE}/earnings.json`));
+}
+
+async function staticTrading(): Promise<TradingPayload> {
+  return cached("trading", () => get<TradingPayload>(`${DATA_BASE}/trading.json`));
+}
+
 export const api = STATIC
   ? {
       articles: staticArticles,
@@ -81,6 +89,8 @@ export const api = STATIC
       signals: staticSignals,
       backtests: staticBacktests,
       dividends: staticDividends,
+      earnings: staticEarnings,
+      trading: staticTrading,
     }
   : {
       articles: (params: { ticker?: string; limit?: number } = {}) => {
@@ -111,4 +121,6 @@ export const api = STATIC
       },
       backtests: () => get<BacktestResult[]>("/api/backtests"),
       dividends: staticDividends,
+      earnings: staticEarnings,
+      trading: staticTrading,
     };

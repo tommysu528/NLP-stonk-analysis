@@ -66,18 +66,59 @@ function useTickerStats(): { stats: TickerStats[]; allSentiment: SentimentScore[
   return { stats, allSentiment, lastSync };
 }
 
+function Sparkline({ scores, color }: { scores: number[]; color: string }) {
+  if (scores.length < 2) return null;
+  const w = 60;
+  const h = 18;
+  const min = Math.min(-0.05, ...scores);
+  const max = Math.max(0.05, ...scores);
+  const range = max - min || 1;
+  const points = scores
+    .map((v, i) => {
+      const x = (i / (scores.length - 1)) * w;
+      const y = h - ((v - min) / range) * h;
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .join(" ");
+  const zeroY = h - ((0 - min) / range) * h;
+  return (
+    <svg width={w} height={h} style={{ display: "block" }}>
+      <line x1={0} y1={zeroY} x2={w} y2={zeroY} stroke="rgba(255,255,255,0.1)" strokeDasharray="2 2" strokeWidth={1} />
+      <polyline points={points} fill="none" stroke={color} strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 function HeatmapTile({ s }: { s: TickerStats }) {
   const Arrow = s.priceChangePct == null ? Minus : s.priceChangePct > 0 ? ArrowUp : s.priceChangePct < 0 ? ArrowDown : Minus;
   const arrowClass = s.priceChangePct == null ? "" : s.priceChangePct > 0 ? "up" : s.priceChangePct < 0 ? "down" : "";
   const changeClass = s.priceChangePct == null ? "" : s.priceChangePct > 0 ? "pos" : "neg";
+  // Sparkline data: oldest-first chronological scores. The query returns
+  // newest-first, so reverse and downsample to ~20 points so the line is
+  // smooth even with hundreds of articles.
+  const sparkScores = useMemo(() => {
+    const chronological = [...s.scores].reverse().map((x) => x.sentiment_score);
+    if (chronological.length <= 20) return chronological;
+    const stride = Math.ceil(chronological.length / 20);
+    const downsampled: number[] = [];
+    for (let i = 0; i < chronological.length; i += stride) {
+      downsampled.push(chronological[i]);
+    }
+    return downsampled;
+  }, [s.scores]);
+  const sparkColor = s.bucket === "bullish" ? "var(--green)" : s.bucket === "bearish" ? "var(--red)" : "var(--text-muted)";
+
   return (
     <Link to={`/ticker/${s.ticker}`} className={`heatmap-tile ${s.bucket}`}>
       <div className="heatmap-tile-top">
         <span className="heatmap-tile-ticker">{s.ticker}</span>
         <span className={`heatmap-tile-arrow ${arrowClass}`}><Arrow size={14} /></span>
       </div>
-      <div className={`heatmap-tile-score ${s.bucket}`}>
-        {s.count > 0 ? fmtScore(s.avgScore) : "—"}
+      <div className="heatmap-tile-mid">
+        <div className={`heatmap-tile-score ${s.bucket}`}>
+          {s.count > 0 ? fmtScore(s.avgScore) : "—"}
+        </div>
+        <Sparkline scores={sparkScores} color={sparkColor} />
       </div>
       <div className="heatmap-tile-bottom">
         <span>{s.count} articles</span>
@@ -137,12 +178,44 @@ function ActiveSignalsCard() {
 
 type NewsFilter = "all" | "bullish" | "bearish";
 
+const MUTED_SOURCES_KEY = "nlp-stonk-muted-sources";
+
+function loadMutedSources(): Set<string> {
+  try {
+    const raw = localStorage.getItem(MUTED_SOURCES_KEY);
+    if (raw) return new Set(JSON.parse(raw));
+  } catch {
+    // localStorage disabled / parse error
+  }
+  return new Set();
+}
+
+function saveMutedSources(set: Set<string>) {
+  try {
+    localStorage.setItem(MUTED_SOURCES_KEY, JSON.stringify([...set]));
+  } catch {
+    // ignore
+  }
+}
+
 function LatestNewsCard({ allSentiment }: { allSentiment: SentimentScore[] }) {
   const [filter, setFilter] = useState<NewsFilter>("all");
+  const [mutedSources, setMutedSources] = useState<Set<string>>(loadMutedSources);
+  const [showSourcePicker, setShowSourcePicker] = useState(false);
   const { data: articles = [] } = useQuery({
     queryKey: ["articles-latest"],
-    queryFn: () => api.articles({ limit: 30 }),
+    queryFn: () => api.articles({ limit: 200 }),
   });
+
+  function toggleSource(source: string) {
+    setMutedSources((prev) => {
+      const next = new Set(prev);
+      if (next.has(source)) next.delete(source);
+      else next.add(source);
+      saveMutedSources(next);
+      return next;
+    });
+  }
 
   const sentimentByArticle = useMemo(() => {
     const map = new Map<number, SentimentScore>();
@@ -175,8 +248,19 @@ function LatestNewsCard({ allSentiment }: { allSentiment: SentimentScore[] }) {
     );
   }, [articles]);
 
+  // Source counts for the picker. Sorted by frequency, with muted ones flagged.
+  const sourceCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const { article } of deduped) {
+      const src = article.source ?? "Unknown";
+      counts.set(src, (counts.get(src) ?? 0) + 1);
+    }
+    return [...counts.entries()].sort((a, b) => b[1] - a[1]);
+  }, [deduped]);
+
   const enriched = useMemo(() => {
     return deduped
+      .filter(({ article }) => !mutedSources.has(article.source ?? "Unknown"))
       .map(({ article, tickers }) => ({
         article,
         tickers,
@@ -189,7 +273,7 @@ function LatestNewsCard({ allSentiment }: { allSentiment: SentimentScore[] }) {
         if (filter === "bearish") return sentiment.sentiment_score < -0.05;
         return true;
       });
-  }, [deduped, sentimentByArticle, filter]);
+  }, [deduped, sentimentByArticle, filter, mutedSources]);
 
   return (
     <div className="card">
@@ -198,18 +282,59 @@ function LatestNewsCard({ allSentiment }: { allSentiment: SentimentScore[] }) {
           <span style={{ color: "var(--text-muted)", display: "flex" }}><Newspaper size={14} /></span>
           Latest News
         </h3>
-        <div className="filter-pills">
-          {(["all", "bullish", "bearish"] as NewsFilter[]).map((f) => (
-            <button
-              key={f}
-              className={`filter-pill ${filter === f ? "active" : ""}`}
-              onClick={() => setFilter(f)}
-            >
-              {f.charAt(0).toUpperCase() + f.slice(1)}
-            </button>
-          ))}
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <button
+            className={`filter-pill ${mutedSources.size > 0 ? "active" : ""}`}
+            onClick={() => setShowSourcePicker(!showSourcePicker)}
+            title="Mute sources"
+            style={{ background: "var(--bg-elevated)", border: "1px solid var(--border)" }}
+          >
+            Sources {mutedSources.size > 0 ? `(${mutedSources.size} muted)` : ""}
+          </button>
+          <div className="filter-pills">
+            {(["all", "bullish", "bearish"] as NewsFilter[]).map((f) => (
+              <button
+                key={f}
+                className={`filter-pill ${filter === f ? "active" : ""}`}
+                onClick={() => setFilter(f)}
+              >
+                {f.charAt(0).toUpperCase() + f.slice(1)}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
+      {showSourcePicker && (
+        <div style={{
+          padding: 12, marginBottom: 12, background: "var(--bg-elevated)",
+          border: "1px solid var(--border)", borderRadius: 6,
+          maxHeight: 200, overflowY: "auto",
+        }}>
+          <div className="muted" style={{ marginBottom: 8, fontSize: 11 }}>
+            Click a source to mute it. Muted sources are remembered locally.
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+            {sourceCounts.map(([src, count]) => {
+              const muted = mutedSources.has(src);
+              return (
+                <button
+                  key={src}
+                  className="filter-pill"
+                  onClick={() => toggleSource(src)}
+                  style={{
+                    background: muted ? "var(--red-bg-strong)" : "var(--bg-card)",
+                    color: muted ? "var(--red)" : "var(--text)",
+                    border: "1px solid var(--border)",
+                    textDecoration: muted ? "line-through" : "none",
+                  }}
+                >
+                  {src} <span className="muted" style={{ marginLeft: 4 }}>{count}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
       {enriched.length === 0 ? (
         <div className="empty-state">No news matches the current filter.</div>
       ) : (

@@ -24,6 +24,7 @@ dependencies = [
     "python-dateutil>=2.9",
     "tenacity>=9.0",
     "click>=8.1",
+    "alpaca-py>=0.30",
 ]
 
 [project.optional-dependencies]
@@ -40,7 +41,7 @@ stonk = "stonk_cli:main"
 py-modules = ["stonk_cli"]
 
 [tool.setuptools.packages.find]
-include = ["api*", "ingestion*", "nlp*", "strategy*", "config*", "scripts*"]
+include = ["api*", "ingestion*", "nlp*", "strategy*", "config*", "scripts*", "trading*"]
 exclude = ["frontend*", "tests*", "migrations*"]
 
 [tool.ruff]

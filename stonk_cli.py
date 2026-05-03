@@ -86,6 +86,22 @@ def dividends() -> None:
     do_run()
 
 
+@cli.command("earnings")
+def earnings() -> None:
+    """Fetch upcoming earnings calendar for tracked tickers."""
+    from ingestion.earnings import run as do_run
+
+    do_run()
+
+
+@cli.command("trade")
+def trade() -> None:
+    """Execute recent signals against Alpaca paper trading (no-op if unconfigured)."""
+    from trading.executor import run as do_run
+
+    do_run()
+
+
 @cli.command("pipeline")
 @click.option("--score-limit", default=200, type=int)
 def pipeline(score_limit: int) -> None:

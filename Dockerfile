@@ -12,6 +12,7 @@ COPY api/ ./api/
 COPY ingestion/ ./ingestion/
 COPY nlp/ ./nlp/
 COPY strategy/ ./strategy/
+COPY trading/ ./trading/
 COPY config/ ./config/
 COPY migrations/ ./migrations/
 COPY scripts/ ./scripts/

@@ -128,6 +128,47 @@ This repo is set up to host itself on GitHub Pages with no external infrastructu
   rethinking past ~100 tickers or ~10k articles.
 - Personal data, auth, or write actions from the UI.
 
+## Paper trading (optional)
+
+The pipeline can auto-execute its signals against an Alpaca paper-trading
+account. Disabled by default; opt in by adding two repo secrets.
+
+### Setup
+
+1. Sign up at <https://alpaca.markets> (free, ~2 minutes).
+2. From the dashboard, generate a **paper-trading** API key + secret. (Make
+   sure you're on Paper, not Live, in the top-right toggle.)
+3. Add the secrets to your repo:
+   Settings → Secrets and variables → Actions →
+   - `ALPACA_API_KEY` = your paper API key
+   - `ALPACA_SECRET_KEY` = your paper secret
+4. Wait for the next cron run (or manually trigger "Refresh data"). The
+   `Execute paper trades` step will start submitting market orders for any
+   fresh BUY/SELL signals during market hours.
+
+### Behavior
+
+- **BUY signal + no existing position + market open**: submit a $500 notional
+  market buy. Idempotent — same signal can't be submitted twice (uses the
+  signal's DB ID as `client_order_id`).
+- **SELL signal + open position in that ticker**: close the entire position.
+- **Otherwise**: skip silently.
+- **Max simultaneous positions**: 8. Tunable via `ALPACA_MAX_POSITIONS`.
+- **Trade size**: $500 per buy. Tunable via `ALPACA_TRADE_SIZE_USD`.
+
+### Going live
+
+Once paper trading has a track record you trust, switch to live:
+1. Generate a separate **live** API key from Alpaca (different from paper).
+2. Replace the secrets in your repo with the live key/secret.
+3. Set `ALPACA_PAPER: "false"` in `.github/workflows/refresh.yml`.
+4. **Strongly recommended first**: drop `ALPACA_TRADE_SIZE_USD` to a small
+   amount (e.g. $50) for the first weeks of live trading.
+
+The Trading dashboard tab will show your positions, P&L, and recent orders
+in either mode. A **LIVE** badge appears next to the page title when
+`ALPACA_PAPER=false`.
+
 ## Documentation
 
 | Doc | What's in it |
