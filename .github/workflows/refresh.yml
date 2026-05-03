@@ -78,6 +78,12 @@ jobs:
       - name: Run backtest
         run: stonk backtest
 
+      - name: Fetch dividend data
+        # Independent of the sentiment pipeline; just yfinance.
+        # Failure here shouldn't block the rest.
+        run: stonk dividends
+        continue-on-error: true
+
       - name: Export JSON snapshots
         run: stonk export
 

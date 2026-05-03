@@ -5,6 +5,7 @@ import Dashboard from "./pages/Dashboard";
 import Ticker from "./pages/Ticker";
 import Backtest from "./pages/Backtest";
 import Watchlist from "./pages/Watchlist";
+import DividendMaxxing from "./pages/DividendMaxxing";
 import { Activity, Search } from "./icons";
 import { TICKERS } from "./types";
 
@@ -42,6 +43,7 @@ function Header() {
         <NavLink to="/" end>Dashboard</NavLink>
         <NavLink to="/backtest">Backtest</NavLink>
         <NavLink to="/watchlist">Watchlist</NavLink>
+        <NavLink to="/dividend-maxxing">Dividend Maxxing</NavLink>
       </nav>
       <div className="app-header-spacer" />
       <form className="app-search" onSubmit={onSubmit}>
@@ -69,6 +71,7 @@ export default function App() {
           <Route path="/ticker/:symbol" element={<Ticker />} />
           <Route path="/backtest" element={<Backtest />} />
           <Route path="/watchlist" element={<Watchlist />} />
+          <Route path="/dividend-maxxing" element={<DividendMaxxing />} />
         </Routes>
       </main>
     </div>

@@ -56,3 +56,22 @@ export const TICKERS = [
   "AAPL", "MSFT", "NVDA", "TSLA", "AMZN",
   "META", "GOOGL", "AMD", "NFLX", "LZ",
 ];
+
+export interface DividendTicker {
+  ticker: string;
+  name: string;
+  price: number | null;
+  change_pct_1d: number | null;
+  dividend_yield: number | null;
+  dividend_rate: number | null;
+  payout_ratio: number | null;
+  ex_dividend_date: string | null;
+  five_year_avg_yield: number | null;
+  sector: string | null;
+  industry: string | null;
+}
+
+export interface DividendsPayload {
+  updated_at: string;
+  tickers: DividendTicker[];
+}

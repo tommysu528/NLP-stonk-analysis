@@ -78,6 +78,14 @@ def export() -> None:
     do_export()
 
 
+@cli.command("dividends")
+def dividends() -> None:
+    """Fetch dividend yield + price for the Dividend Maxxing watchlist."""
+    from ingestion.dividends import run as do_run
+
+    do_run()
+
+
 @cli.command("pipeline")
 @click.option("--score-limit", default=200, type=int)
 def pipeline(score_limit: int) -> None:
