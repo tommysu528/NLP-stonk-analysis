@@ -102,6 +102,14 @@ def trade() -> None:
     do_run()
 
 
+@cli.command("crypto")
+def crypto() -> None:
+    """Fetch BTC/ETH hourly bars and run the grid backtest simulator."""
+    from ingestion.crypto import run as do_run
+
+    do_run()
+
+
 @cli.command("pipeline")
 @click.option("--score-limit", default=200, type=int)
 def pipeline(score_limit: int) -> None:

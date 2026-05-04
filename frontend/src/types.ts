@@ -141,3 +141,56 @@ export interface TradingPayload {
   recent_orders?: TradingOrder[];
   equity_curve?: EquityPoint[];
 }
+
+export interface GridFill {
+  timestamp: string;
+  side: "buy" | "sell";
+  price: number;
+  qty: number;
+  level_idx: number;
+  pnl_usd: number;
+}
+
+export interface GridBar {
+  timestamp: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+}
+
+export interface GridConfigOut {
+  pair: string;
+  lower: number;
+  upper: number;
+  n_levels: number;
+  capital_usd: number;
+  fee_rate: number;
+}
+
+export interface GridPair {
+  pair: string;
+  config: GridConfigOut;
+  levels: number[];
+  fills: GridFill[];
+  round_trips: number;
+  total_pnl_usd: number;
+  total_fees_usd: number;
+  realized_return_pct: number;
+  unrealized_pnl_usd: number;
+  unrealized_holdings: number;
+  avg_holding_price: number;
+  final_price: number;
+  max_drawdown_pct: number;
+  open_buy_levels: number[];
+  equity_curve: { timestamp: string; equity: number }[];
+  bar_count: number;
+  bars: GridBar[];
+  error?: string;
+}
+
+export interface CryptoPayload {
+  updated_at: string;
+  pairs: GridPair[];
+}
