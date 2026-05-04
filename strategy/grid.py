@@ -121,12 +121,21 @@ def walk_forward(
     n_levels: int = 12,
     starting_capital: float = 1000.0,
     fee_rate: float = 0.001,
+    trend_filter_threshold: float = 0.0,  # 0 disables; e.g., 0.20 = skip segment if lookback close-to-close moved > 20%
+    range_breach_pct: float = 0.0,  # 0 disables; passed to simulate()
+    drawdown_halt_pct: float = 0.0,  # 0 disables; passed to simulate()
 ) -> WalkForwardResult:
     """Walk-forward grid backtest: re-derive the grid range every segment_days
     using the trailing lookback_days of price history. Compounds capital
     between segments — start segment N+1 with whatever segment N ended at.
 
     Bars are expected to be daily; segment_days/lookback_days are in days.
+
+    Optional risk controls:
+      trend_filter_threshold: skip a segment entirely if the lookback window's
+        close-to-close return exceeds this in either direction (price was
+        clearly trending — bad time for a range-bound strategy).
+      range_breach_pct / drawdown_halt_pct: passed through to simulate().
     """
     if not bars:
         return WalkForwardResult(
@@ -170,11 +179,39 @@ def walk_forward(
             i = seg_end_idx
             continue
 
+        # Trend filter: if the lookback period had a strong directional move,
+        # skip this segment (carry capital forward unchanged).
+        if trend_filter_threshold > 0 and len(lookback_slice) >= 2:
+            lookback_return = (lookback_slice[-1]["close"] - lookback_slice[0]["close"]) / lookback_slice[0]["close"]
+            if abs(lookback_return) > trend_filter_threshold:
+                # Skip segment, no trades, capital unchanged
+                seg = WalkForwardSegment(
+                    period_start=str(segment_bars[0]["timestamp"]),
+                    period_end=str(segment_bars[-1]["timestamp"]),
+                    config_lower=round(lower, 2),
+                    config_upper=round(upper, 2),
+                    starting_capital=round(capital, 2),
+                    ending_equity=round(capital, 2),
+                    return_pct=0.0,
+                    round_trips=0,
+                    max_drawdown_pct=0.0,
+                    bars_in_range_pct=0.0,
+                )
+                segments_out.append(seg)
+                # Add flat equity points for the skipped segment
+                for b in segment_bars:
+                    equity_curve_out.append({"timestamp": str(b["timestamp"]), "equity": round(capital, 2)})
+                bars_seen_total += len(segment_bars)
+                i = seg_end_idx
+                continue
+
         config = GridConfig(
             pair=pair, lower=lower, upper=upper, n_levels=n_levels,
             capital_usd=capital, fee_rate=fee_rate,
         )
-        result = simulate(config, segment_bars)
+        result = simulate(config, segment_bars,
+                          range_breach_pct=range_breach_pct,
+                          drawdown_halt_pct=drawdown_halt_pct)
 
         ending_equity = capital + result.total_pnl_usd
 
@@ -259,24 +296,33 @@ def walk_forward(
     )
 
 
-def simulate(config: GridConfig, bars: Iterable[dict]) -> GridResult:
+def simulate(
+    config: GridConfig,
+    bars: Iterable[dict],
+    range_breach_pct: float = 0.0,  # 0 disables; e.g., 0.05 = flatten if price > upper*1.05 or < lower*0.95
+    drawdown_halt_pct: float = 0.0,  # 0 disables; e.g., 0.15 = halt if equity drops 15% from peak
+) -> GridResult:
     """bars: iterable of {'timestamp', 'open', 'high', 'low', 'close'} sorted asc.
 
     Each grid level holds at most one buy order. When a buy fills, it places
     a sell at the next level up. When that sell fills, the buy is restored.
+
+    Optional risk controls (off by default for back-compat):
+      range_breach_pct: if price moves > this far past upper/lower, flatten
+        all positions at the current close and stop trading for the rest of
+        the bar stream.
+      drawdown_halt_pct: if equity drops > this fraction from its peak, halt.
     """
     levels = config.levels()
     if not levels:
         return GridResult(pair=config.pair, config=asdict(config), levels=[])
 
     n = len(levels)
-    capital_per_level = config.capital_usd / max(n - 1, 1)  # n-1 buy slots; topmost level only sells
+    capital_per_level = config.capital_usd / max(n - 1, 1)
+    upper_breach = config.upper * (1 + range_breach_pct) if range_breach_pct > 0 else float("inf")
+    lower_breach = config.lower * (1 - range_breach_pct) if range_breach_pct > 0 else 0.0
 
-    # State per level: 'buy_open' (resting buy), 'sell_open' (resting sell at this
-    # level after a buy filled below), 'idle' (between fills).
-    # buys[i] = base asset qty held when level i has been bought and is waiting
-    # to sell at level i+1.
-    state = ["buy_open"] * (n - 1) + ["idle"]  # topmost level: nothing rests
+    state = ["buy_open"] * (n - 1) + ["idle"]
     buy_qty = [0.0] * n
     buy_price = [0.0] * n
 
@@ -288,6 +334,7 @@ def simulate(config: GridConfig, bars: Iterable[dict]) -> GridResult:
     last_close = 0.0
     bar_count = 0
     peak_equity = config.capital_usd
+    halted = False
 
     for bar in bars:
         bar_count += 1
@@ -300,13 +347,14 @@ def simulate(config: GridConfig, bars: Iterable[dict]) -> GridResult:
             continue
         last_close = close
 
-        # Cross checks: if low <= level <= high, the bar swept that price.
-        # Walk levels low->high to fill buys as price drops, then high->low for sells.
+        if halted:
+            equity_curve.append({"timestamp": str(t), "equity": round(config.capital_usd + realized_pnl, 2)})
+            continue
+
         for i, lvl in enumerate(levels):
             if state[i] != "buy_open" or i >= n - 1:
                 continue
             if low <= lvl:
-                # Buy fills at level price
                 qty = capital_per_level / lvl
                 fee = capital_per_level * config.fee_rate
                 buy_qty[i] = qty
@@ -316,7 +364,6 @@ def simulate(config: GridConfig, bars: Iterable[dict]) -> GridResult:
                 fills.append(Fill(timestamp=str(t), side="buy", price=lvl, qty=qty, level_idx=i))
 
         for i in range(n - 1, 0, -1):
-            # A sell at level i corresponds to buy that filled at level i-1
             if state[i - 1] != "sell_open":
                 continue
             sell_lvl = levels[i]
@@ -329,25 +376,51 @@ def simulate(config: GridConfig, bars: Iterable[dict]) -> GridResult:
                 realized_pnl += pnl
                 total_fees += fee
                 round_trips += 1
-                fills.append(
-                    Fill(
-                        timestamp=str(t),
-                        side="sell",
-                        price=sell_lvl,
-                        qty=qty,
-                        level_idx=i,
-                        pnl_usd=pnl,
-                    )
-                )
+                fills.append(Fill(timestamp=str(t), side="sell", price=sell_lvl, qty=qty, level_idx=i, pnl_usd=pnl))
                 buy_qty[i - 1] = 0.0
                 buy_price[i - 1] = 0.0
                 state[i - 1] = "buy_open"
 
-        # Track equity = realized_pnl + unrealized at current close
         unreal = sum(buy_qty[i] * (close - buy_price[i]) for i in range(n) if buy_qty[i] > 0)
         equity = config.capital_usd + realized_pnl + unreal
         peak_equity = max(peak_equity, equity)
         equity_curve.append({"timestamp": str(t), "equity": round(equity, 2)})
+
+        # Risk control 1: flatten if price escapes range by buffer
+        if range_breach_pct > 0 and (high > upper_breach or low < lower_breach):
+            for i in range(n):
+                if buy_qty[i] > 0:
+                    qty = buy_qty[i]
+                    proceeds = qty * close
+                    fee = proceeds * config.fee_rate
+                    pnl = proceeds - qty * buy_price[i] - fee
+                    realized_pnl += pnl
+                    total_fees += fee
+                    fills.append(Fill(timestamp=str(t), side="sell", price=close, qty=qty, level_idx=i, pnl_usd=pnl))
+                    buy_qty[i] = 0.0
+                    buy_price[i] = 0.0
+                    state[i] = "idle"
+            halted = True
+            continue
+
+        # Risk control 2: halt if equity drops too far from peak
+        if drawdown_halt_pct > 0 and peak_equity > 0:
+            dd = (equity - peak_equity) / peak_equity
+            if dd <= -drawdown_halt_pct:
+                for i in range(n):
+                    if buy_qty[i] > 0:
+                        qty = buy_qty[i]
+                        proceeds = qty * close
+                        fee = proceeds * config.fee_rate
+                        pnl = proceeds - qty * buy_price[i] - fee
+                        realized_pnl += pnl
+                        total_fees += fee
+                        fills.append(Fill(timestamp=str(t), side="sell", price=close, qty=qty, level_idx=i, pnl_usd=pnl))
+                        buy_qty[i] = 0.0
+                        buy_price[i] = 0.0
+                        state[i] = "idle"
+                halted = True
+                continue
 
     # Wrap up
     held_base = sum(buy_qty)

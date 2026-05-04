@@ -75,12 +75,23 @@ def run_pair(pair: str, yf_symbol: str) -> dict:
     # every 30 days from the prior 30 days. Compounds capital across segments.
     long_bars = fetch_bars(yf_symbol, period="2y", interval="1d")
     if len(long_bars) >= 90:
-        wf = walk_forward(long_bars, pair=pair, segment_days=30, lookback_days=30,
-                          n_levels=12, starting_capital=1000.0, fee_rate=0.001)
-        res["walk_forward"] = asdict(wf)
+        # Raw: no risk controls
+        wf_raw = walk_forward(long_bars, pair=pair, segment_days=30, lookback_days=30,
+                              n_levels=12, starting_capital=1000.0, fee_rate=0.001)
+        # Protected: trend filter + range breach stop + drawdown halt
+        wf_protected = walk_forward(
+            long_bars, pair=pair, segment_days=30, lookback_days=30,
+            n_levels=12, starting_capital=1000.0, fee_rate=0.001,
+            trend_filter_threshold=0.20,   # skip segments where lookback moved >20%
+            range_breach_pct=0.05,         # flatten if price escapes range by 5%
+            drawdown_halt_pct=0.15,        # halt segment if equity drops 15% from peak
+        )
+        res["walk_forward"] = asdict(wf_raw)
+        res["walk_forward_protected"] = asdict(wf_protected)
     else:
         log.warning("Not enough daily bars for %s walk-forward (%d)", pair, len(long_bars))
         res["walk_forward"] = None
+        res["walk_forward_protected"] = None
 
     return res
 

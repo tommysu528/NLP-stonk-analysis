@@ -225,6 +225,7 @@ export interface WalkForwardResult {
 
 export interface GridPairWithWF extends GridPair {
   walk_forward: WalkForwardResult | null;
+  walk_forward_protected: WalkForwardResult | null;
 }
 
 export interface CryptoPayload {

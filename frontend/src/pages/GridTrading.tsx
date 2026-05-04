@@ -77,13 +77,23 @@ export default function GridTrading() {
   );
 }
 
-function WalkForwardCard({ wf, pair }: { wf: WalkForwardResult; pair: string }) {
-  const losing = wf.total_return_pct < 0;
-  const equityChart = wf.equity_curve.map((e) => ({
+function WalkForwardCard({
+  wf,
+  wfProtected,
+  pair,
+}: {
+  wf: WalkForwardResult;
+  wfProtected: WalkForwardResult | null;
+  pair: string;
+}) {
+  const [variant, setVariant] = useState<"raw" | "protected">(wfProtected ? "protected" : "raw");
+  const active = variant === "protected" && wfProtected ? wfProtected : wf;
+  const losing = active.total_return_pct < 0;
+  const equityChart = active.equity_curve.map((e) => ({
     t: new Date(e.timestamp).getTime(),
     equity: e.equity,
   }));
-  const segReturns = wf.segments.map((s, i) => ({
+  const segReturns = active.segments.map((s, i) => ({
     idx: i,
     period: new Date(s.period_start).toLocaleDateString(undefined, { month: "short", year: "2-digit" }),
     return: s.return_pct * 100,
@@ -99,36 +109,87 @@ function WalkForwardCard({ wf, pair }: { wf: WalkForwardResult; pair: string }) 
             {losing && <span className="pill sell" style={{ marginLeft: 8 }}>STRATEGY UNPROFITABLE</span>}
           </h3>
           <p className="card-subtitle">
-            Re-derives the grid every {wf.segment_days} days from the prior {wf.lookback_days}-day high/low.
-            This simulates real deployment — periodic re-tuning as market conditions shift.
+            Re-derives the grid every {active.segment_days} days from the prior {active.lookback_days}-day high/low.
+            {variant === "protected"
+              ? " With trend filter (skip ±20% lookback moves), range-breach stop (5%), and drawdown halt (15%)."
+              : " No risk controls — naive baseline."}
           </p>
         </div>
+        {wfProtected && (
+          <div className="filter-pills">
+            <button
+              className={`filter-pill ${variant === "raw" ? "active" : ""}`}
+              onClick={() => setVariant("raw")}
+            >
+              Raw
+            </button>
+            <button
+              className={`filter-pill ${variant === "protected" ? "active" : ""}`}
+              onClick={() => setVariant("protected")}
+            >
+              With risk controls
+            </button>
+          </div>
+        )}
       </div>
+
+      {wfProtected && (
+        <div style={{
+          background: "var(--bg-elevated)", padding: 12, borderRadius: 6,
+          border: "1px solid var(--border)", marginBottom: 16, fontSize: 12,
+          display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12,
+        }}>
+          <div>
+            <div className="muted" style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.05em" }}>Raw return</div>
+            <div className={`mono ${wf.total_return_pct >= 0 ? "text-pos" : "text-neg"}`} style={{ fontSize: 16, fontWeight: 600 }}>
+              {(wf.total_return_pct * 100).toFixed(1)}%
+            </div>
+          </div>
+          <div>
+            <div className="muted" style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.05em" }}>Protected return</div>
+            <div className={`mono ${wfProtected.total_return_pct >= 0 ? "text-pos" : "text-neg"}`} style={{ fontSize: 16, fontWeight: 600 }}>
+              {(wfProtected.total_return_pct * 100).toFixed(1)}%
+            </div>
+          </div>
+          <div>
+            <div className="muted" style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.05em" }}>Raw max DD</div>
+            <div className="mono text-neg" style={{ fontSize: 16, fontWeight: 600 }}>
+              {(wf.max_drawdown_pct * 100).toFixed(1)}%
+            </div>
+          </div>
+          <div>
+            <div className="muted" style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.05em" }}>Protected max DD</div>
+            <div className="mono text-neg" style={{ fontSize: 16, fontWeight: 600 }}>
+              {(wfProtected.max_drawdown_pct * 100).toFixed(1)}%
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="kpi-row">
         <div className="kpi">
           <div className="kpi-label">Total Return</div>
           <div className={`kpi-value ${losing ? "text-neg" : "text-pos"}`}>
-            {(wf.total_return_pct * 100).toFixed(1)}%
+            {(active.total_return_pct * 100).toFixed(1)}%
           </div>
-          <div className="kpi-sub">${wf.starting_capital.toFixed(0)} &rarr; ${wf.ending_equity.toFixed(0)}</div>
+          <div className="kpi-sub">${active.starting_capital.toFixed(0)} &rarr; ${active.ending_equity.toFixed(0)}</div>
         </div>
         <div className="kpi">
           <div className="kpi-label">Annualized</div>
-          <div className={`kpi-value ${wf.annualized_return_pct < 0 ? "text-neg" : "text-pos"}`}>
-            {(wf.annualized_return_pct * 100).toFixed(1)}%
+          <div className={`kpi-value ${active.annualized_return_pct < 0 ? "text-neg" : "text-pos"}`}>
+            {(active.annualized_return_pct * 100).toFixed(1)}%
           </div>
-          <div className="kpi-sub">over ~{wf.total_segments} months</div>
+          <div className="kpi-sub">over ~{active.total_segments} months</div>
         </div>
         <div className="kpi">
           <div className="kpi-label">Max Drawdown</div>
-          <div className="kpi-value text-neg">{(wf.max_drawdown_pct * 100).toFixed(1)}%</div>
+          <div className="kpi-value text-neg">{(active.max_drawdown_pct * 100).toFixed(1)}%</div>
           <div className="kpi-sub">peak-to-trough loss</div>
         </div>
         <div className="kpi">
           <div className="kpi-label">Bars In Range</div>
-          <div className={`kpi-value ${wf.bars_in_range_pct < 0.7 ? "text-neg" : ""}`}>
-            {(wf.bars_in_range_pct * 100).toFixed(0)}%
+          <div className={`kpi-value ${active.bars_in_range_pct < 0.7 ? "text-neg" : ""}`}>
+            {(active.bars_in_range_pct * 100).toFixed(0)}%
           </div>
           <div className="kpi-sub">price stays within grid bounds</div>
         </div>
@@ -143,7 +204,7 @@ function WalkForwardCard({ wf, pair }: { wf: WalkForwardResult; pair: string }) 
             <YAxis domain={["auto", "auto"]} tickFormatter={(v) => `$${v.toFixed(0)}`} />
             <Tooltip labelFormatter={(t) => new Date(t as number).toLocaleDateString()}
                      formatter={(v: number) => `$${v.toFixed(2)}`} />
-            <ReferenceLine y={wf.starting_capital} stroke="rgba(255,255,255,0.25)" strokeDasharray="3 3" />
+            <ReferenceLine y={active.starting_capital} stroke="rgba(255,255,255,0.25)" strokeDasharray="3 3" />
             <Line type="monotone" dataKey="equity" stroke={losing ? "var(--red)" : "var(--green)"}
                   strokeWidth={1.5} dot={false} />
           </ComposedChart>
@@ -166,7 +227,7 @@ function WalkForwardCard({ wf, pair }: { wf: WalkForwardResult; pair: string }) 
               </tr>
             </thead>
             <tbody>
-              {wf.segments.map((s, i) => (
+              {active.segments.map((s, i) => (
                 <tr key={i}>
                   <td className="text-neutral" style={{ fontSize: 12 }}>{segReturns[i].period}</td>
                   <td className={`mono ${s.return_pct >= 0 ? "text-pos" : "text-neg"}`} style={{ textAlign: "right" }}>
@@ -192,19 +253,19 @@ function WalkForwardCard({ wf, pair }: { wf: WalkForwardResult; pair: string }) 
               {losing ? (
                 <>
                   <p style={{ marginTop: 0 }}>
-                    <strong>{pair} grid lost {Math.abs(wf.total_return_pct * 100).toFixed(1)}%</strong> over the
-                    last 2 years despite winning {wf.profitable_segments} of {wf.total_segments} months.
+                    <strong>{pair} grid lost {Math.abs(active.total_return_pct * 100).toFixed(1)}%</strong> over the
+                    last 2 years despite winning {active.profitable_segments} of {active.total_segments} months.
                   </p>
                   <p>
                     The losing months wiped out the gains, with a worst-segment loss of
-                    <strong className="text-neg"> {(wf.worst_segment_return_pct * 100).toFixed(1)}%</strong>.
+                    <strong className="text-neg"> {(active.worst_segment_return_pct * 100).toFixed(1)}%</strong>.
                     This is the classic grid failure mode: <strong>directional breakouts.</strong> When
                     price walks out of the grid range and stays out, the bot keeps buying all the way
                     down with no sell-side fills.
                   </p>
                   <p>
-                    Bars-in-range was only <strong>{(wf.bars_in_range_pct * 100).toFixed(0)}%</strong> &mdash;
-                    price was outside the grid {(100 - wf.bars_in_range_pct * 100).toFixed(0)}% of the time.
+                    Bars-in-range was only <strong>{(active.bars_in_range_pct * 100).toFixed(0)}%</strong> &mdash;
+                    price was outside the grid {(100 - active.bars_in_range_pct * 100).toFixed(0)}% of the time.
                     A range-bound strategy needs price to stay range-bound.
                   </p>
                   <p style={{ marginBottom: 0 }}>
@@ -217,13 +278,13 @@ function WalkForwardCard({ wf, pair }: { wf: WalkForwardResult; pair: string }) 
               ) : (
                 <>
                   <p style={{ marginTop: 0 }}>
-                    {pair} grid earned <strong className="text-pos">{(wf.total_return_pct * 100).toFixed(1)}%</strong> over
-                    the last 2 years, profitable in {wf.profitable_segments} of {wf.total_segments} months.
-                    Annualized: <strong>{(wf.annualized_return_pct * 100).toFixed(1)}%</strong>.
+                    {pair} grid earned <strong className="text-pos">{(active.total_return_pct * 100).toFixed(1)}%</strong> over
+                    the last 2 years, profitable in {active.profitable_segments} of {active.total_segments} months.
+                    Annualized: <strong>{(active.annualized_return_pct * 100).toFixed(1)}%</strong>.
                   </p>
                   <p style={{ marginBottom: 0 }}>
-                    Worst single segment: {(wf.worst_segment_return_pct * 100).toFixed(1)}%. Max drawdown:
-                    {(wf.max_drawdown_pct * 100).toFixed(1)}%. Strategy survived multiple regimes &mdash;
+                    Worst single segment: {(active.worst_segment_return_pct * 100).toFixed(1)}%. Max drawdown:
+                    {(active.max_drawdown_pct * 100).toFixed(1)}%. Strategy survived multiple regimes &mdash;
                     a meaningful step toward live trading, though paper trading on a real exchange
                     testnet is still the next step before any real funds.
                   </p>
@@ -469,7 +530,13 @@ function Body({
         </div>
       </div>
 
-      {(pair as any).walk_forward && <WalkForwardCard wf={(pair as any).walk_forward} pair={pair.pair} />}
+      {(pair as any).walk_forward && (
+        <WalkForwardCard
+          wf={(pair as any).walk_forward}
+          wfProtected={(pair as any).walk_forward_protected}
+          pair={pair.pair}
+        />
+      )}
     </>
   );
 }
