@@ -18,7 +18,7 @@ from pathlib import Path
 
 import yfinance as yf
 
-from strategy.grid import GridConfig, derive_range, simulate
+from strategy.grid import GridConfig, derive_range, simulate, walk_forward
 
 log = logging.getLogger(__name__)
 
@@ -70,6 +70,18 @@ def run_pair(pair: str, yf_symbol: str) -> dict:
     result = simulate(config, bars)
     res = asdict(result)
     res["bars"] = bars  # keep for chart rendering
+
+    # Long-horizon walk-forward backtest: 2y of daily bars, re-derive the grid
+    # every 30 days from the prior 30 days. Compounds capital across segments.
+    long_bars = fetch_bars(yf_symbol, period="2y", interval="1d")
+    if len(long_bars) >= 90:
+        wf = walk_forward(long_bars, pair=pair, segment_days=30, lookback_days=30,
+                          n_levels=12, starting_capital=1000.0, fee_rate=0.001)
+        res["walk_forward"] = asdict(wf)
+    else:
+        log.warning("Not enough daily bars for %s walk-forward (%d)", pair, len(long_bars))
+        res["walk_forward"] = None
+
     return res
 
 

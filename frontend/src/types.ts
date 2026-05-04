@@ -190,7 +190,44 @@ export interface GridPair {
   error?: string;
 }
 
+export interface WalkForwardSegment {
+  period_start: string;
+  period_end: string;
+  config_lower: number;
+  config_upper: number;
+  starting_capital: number;
+  ending_equity: number;
+  return_pct: number;
+  round_trips: number;
+  max_drawdown_pct: number;
+  bars_in_range_pct: number;
+}
+
+export interface WalkForwardResult {
+  pair: string;
+  segment_days: number;
+  lookback_days: number;
+  starting_capital: number;
+  ending_equity: number;
+  total_return_pct: number;
+  annualized_return_pct: number;
+  max_drawdown_pct: number;
+  profitable_segments: number;
+  total_segments: number;
+  total_round_trips: number;
+  avg_segment_return_pct: number;
+  worst_segment_return_pct: number;
+  best_segment_return_pct: number;
+  bars_in_range_pct: number;
+  segments: WalkForwardSegment[];
+  equity_curve: { timestamp: string; equity: number }[];
+}
+
+export interface GridPairWithWF extends GridPair {
+  walk_forward: WalkForwardResult | null;
+}
+
 export interface CryptoPayload {
   updated_at: string;
-  pairs: GridPair[];
+  pairs: GridPairWithWF[];
 }

@@ -11,7 +11,7 @@ import {
   YAxis,
 } from "recharts";
 import { api } from "../api";
-import type { GridPair } from "../types";
+import type { GridPair, WalkForwardResult } from "../types";
 import { fmtPct, formatTime, timeAgo } from "../utils";
 
 function fmtMoney(v: number, digits = 2): string {
@@ -74,6 +74,166 @@ export default function GridTrading() {
         until the simulation parameters look right.
       </p>
     </>
+  );
+}
+
+function WalkForwardCard({ wf, pair }: { wf: WalkForwardResult; pair: string }) {
+  const losing = wf.total_return_pct < 0;
+  const equityChart = wf.equity_curve.map((e) => ({
+    t: new Date(e.timestamp).getTime(),
+    equity: e.equity,
+  }));
+  const segReturns = wf.segments.map((s, i) => ({
+    idx: i,
+    period: new Date(s.period_start).toLocaleDateString(undefined, { month: "short", year: "2-digit" }),
+    return: s.return_pct * 100,
+    inRange: s.bars_in_range_pct * 100,
+  }));
+
+  return (
+    <div className="card" style={{ marginTop: 24, borderColor: losing ? "var(--red)" : "var(--border)" }}>
+      <div className="card-header">
+        <div>
+          <h3 className="card-title">
+            2-Year Walk-Forward Backtest
+            {losing && <span className="pill sell" style={{ marginLeft: 8 }}>STRATEGY UNPROFITABLE</span>}
+          </h3>
+          <p className="card-subtitle">
+            Re-derives the grid every {wf.segment_days} days from the prior {wf.lookback_days}-day high/low.
+            This simulates real deployment — periodic re-tuning as market conditions shift.
+          </p>
+        </div>
+      </div>
+
+      <div className="kpi-row">
+        <div className="kpi">
+          <div className="kpi-label">Total Return</div>
+          <div className={`kpi-value ${losing ? "text-neg" : "text-pos"}`}>
+            {(wf.total_return_pct * 100).toFixed(1)}%
+          </div>
+          <div className="kpi-sub">${wf.starting_capital.toFixed(0)} &rarr; ${wf.ending_equity.toFixed(0)}</div>
+        </div>
+        <div className="kpi">
+          <div className="kpi-label">Annualized</div>
+          <div className={`kpi-value ${wf.annualized_return_pct < 0 ? "text-neg" : "text-pos"}`}>
+            {(wf.annualized_return_pct * 100).toFixed(1)}%
+          </div>
+          <div className="kpi-sub">over ~{wf.total_segments} months</div>
+        </div>
+        <div className="kpi">
+          <div className="kpi-label">Max Drawdown</div>
+          <div className="kpi-value text-neg">{(wf.max_drawdown_pct * 100).toFixed(1)}%</div>
+          <div className="kpi-sub">peak-to-trough loss</div>
+        </div>
+        <div className="kpi">
+          <div className="kpi-label">Bars In Range</div>
+          <div className={`kpi-value ${wf.bars_in_range_pct < 0.7 ? "text-neg" : ""}`}>
+            {(wf.bars_in_range_pct * 100).toFixed(0)}%
+          </div>
+          <div className="kpi-sub">price stays within grid bounds</div>
+        </div>
+      </div>
+
+      <div style={{ width: "100%", height: 280, marginBottom: 16 }}>
+        <ResponsiveContainer>
+          <ComposedChart data={equityChart} margin={{ top: 8, right: 16, bottom: 0, left: 8 }}>
+            <CartesianGrid strokeDasharray="3 3" />
+            <XAxis dataKey="t" type="number" domain={["dataMin", "dataMax"]}
+                   tickFormatter={(t) => new Date(t).toLocaleDateString(undefined, { month: "short", year: "2-digit" })} />
+            <YAxis domain={["auto", "auto"]} tickFormatter={(v) => `$${v.toFixed(0)}`} />
+            <Tooltip labelFormatter={(t) => new Date(t as number).toLocaleDateString()}
+                     formatter={(v: number) => `$${v.toFixed(2)}`} />
+            <ReferenceLine y={wf.starting_capital} stroke="rgba(255,255,255,0.25)" strokeDasharray="3 3" />
+            <Line type="monotone" dataKey="equity" stroke={losing ? "var(--red)" : "var(--green)"}
+                  strokeWidth={1.5} dot={false} />
+          </ComposedChart>
+        </ResponsiveContainer>
+      </div>
+
+      <div className="two-col">
+        <div>
+          <h4 style={{ fontSize: 13, color: "var(--text-muted)", marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+            Per-segment summary
+          </h4>
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Period</th>
+                <th style={{ textAlign: "right" }}>Return</th>
+                <th style={{ textAlign: "right" }}>In range</th>
+                <th style={{ textAlign: "right" }}>Trips</th>
+                <th style={{ textAlign: "right" }}>End equity</th>
+              </tr>
+            </thead>
+            <tbody>
+              {wf.segments.map((s, i) => (
+                <tr key={i}>
+                  <td className="text-neutral" style={{ fontSize: 12 }}>{segReturns[i].period}</td>
+                  <td className={`mono ${s.return_pct >= 0 ? "text-pos" : "text-neg"}`} style={{ textAlign: "right" }}>
+                    {(s.return_pct * 100).toFixed(1)}%
+                  </td>
+                  <td className={`mono ${s.bars_in_range_pct < 0.5 ? "text-neg" : ""}`} style={{ textAlign: "right" }}>
+                    {(s.bars_in_range_pct * 100).toFixed(0)}%
+                  </td>
+                  <td className="mono text-neutral" style={{ textAlign: "right" }}>{s.round_trips}</td>
+                  <td className="mono" style={{ textAlign: "right" }}>${s.ending_equity.toFixed(0)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <div>
+          <h4 style={{ fontSize: 13, color: "var(--text-muted)", marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+            What this tells you
+          </h4>
+          <div style={{ background: losing ? "rgba(239,68,68,0.08)" : "var(--bg-elevated)", padding: 16, borderRadius: 8, border: `1px solid ${losing ? "rgba(239,68,68,0.3)" : "var(--border)"}` }}>
+            <div style={{ fontSize: 13, lineHeight: 1.6 }}>
+              {losing ? (
+                <>
+                  <p style={{ marginTop: 0 }}>
+                    <strong>{pair} grid lost {Math.abs(wf.total_return_pct * 100).toFixed(1)}%</strong> over the
+                    last 2 years despite winning {wf.profitable_segments} of {wf.total_segments} months.
+                  </p>
+                  <p>
+                    The losing months wiped out the gains, with a worst-segment loss of
+                    <strong className="text-neg"> {(wf.worst_segment_return_pct * 100).toFixed(1)}%</strong>.
+                    This is the classic grid failure mode: <strong>directional breakouts.</strong> When
+                    price walks out of the grid range and stays out, the bot keeps buying all the way
+                    down with no sell-side fills.
+                  </p>
+                  <p>
+                    Bars-in-range was only <strong>{(wf.bars_in_range_pct * 100).toFixed(0)}%</strong> &mdash;
+                    price was outside the grid {(100 - wf.bars_in_range_pct * 100).toFixed(0)}% of the time.
+                    A range-bound strategy needs price to stay range-bound.
+                  </p>
+                  <p style={{ marginBottom: 0 }}>
+                    <strong>Do not run this live without major changes.</strong> Minimum: a hard stop-loss
+                    on portfolio drawdown (e.g., halt at -15%), a trend filter (don't trade when price is
+                    in a strong directional move), and tighter range re-tuning. Even then, grids lose to
+                    persistent trends &mdash; that's structural.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p style={{ marginTop: 0 }}>
+                    {pair} grid earned <strong className="text-pos">{(wf.total_return_pct * 100).toFixed(1)}%</strong> over
+                    the last 2 years, profitable in {wf.profitable_segments} of {wf.total_segments} months.
+                    Annualized: <strong>{(wf.annualized_return_pct * 100).toFixed(1)}%</strong>.
+                  </p>
+                  <p style={{ marginBottom: 0 }}>
+                    Worst single segment: {(wf.worst_segment_return_pct * 100).toFixed(1)}%. Max drawdown:
+                    {(wf.max_drawdown_pct * 100).toFixed(1)}%. Strategy survived multiple regimes &mdash;
+                    a meaningful step toward live trading, though paper trading on a real exchange
+                    testnet is still the next step before any real funds.
+                  </p>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -308,6 +468,8 @@ function Body({
           </p>
         </div>
       </div>
+
+      {(pair as any).walk_forward && <WalkForwardCard wf={(pair as any).walk_forward} pair={pair.pair} />}
     </>
   );
 }

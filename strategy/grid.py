@@ -67,15 +67,196 @@ class GridResult:
 
 
 def derive_range(closes: list[float], trim_frac: float = 0.10) -> tuple[float, float]:
-    """Use 30d hi/lo trimmed by trim_frac on each side. Returns (lower, upper).
-    Falls back to ±15% around current price if input is too short."""
-    if len(closes) < 24:
+    """Use hi/lo trimmed by trim_frac on each side. Returns (lower, upper).
+    Falls back to +/-15% around current price if input is too short."""
+    if len(closes) < 5:
         last = closes[-1] if closes else 1.0
         return last * 0.85, last * 1.15
     hi = max(closes)
     lo = min(closes)
     rng = hi - lo
     return lo + rng * trim_frac, hi - rng * trim_frac
+
+
+@dataclass
+class WalkForwardSegment:
+    period_start: str
+    period_end: str
+    config_lower: float
+    config_upper: float
+    starting_capital: float
+    ending_equity: float
+    return_pct: float
+    round_trips: int
+    max_drawdown_pct: float
+    bars_in_range_pct: float  # how often price stayed within grid bounds
+
+
+@dataclass
+class WalkForwardResult:
+    pair: str
+    segment_days: int
+    lookback_days: int
+    starting_capital: float
+    ending_equity: float
+    total_return_pct: float
+    annualized_return_pct: float
+    max_drawdown_pct: float
+    profitable_segments: int
+    total_segments: int
+    total_round_trips: int
+    avg_segment_return_pct: float
+    worst_segment_return_pct: float
+    best_segment_return_pct: float
+    bars_in_range_pct: float
+    segments: list[dict] = field(default_factory=list)
+    equity_curve: list[dict] = field(default_factory=list)
+
+
+def walk_forward(
+    bars: list[dict],
+    pair: str,
+    segment_days: int = 30,
+    lookback_days: int = 30,
+    n_levels: int = 12,
+    starting_capital: float = 1000.0,
+    fee_rate: float = 0.001,
+) -> WalkForwardResult:
+    """Walk-forward grid backtest: re-derive the grid range every segment_days
+    using the trailing lookback_days of price history. Compounds capital
+    between segments — start segment N+1 with whatever segment N ended at.
+
+    Bars are expected to be daily; segment_days/lookback_days are in days.
+    """
+    if not bars:
+        return WalkForwardResult(
+            pair=pair, segment_days=segment_days, lookback_days=lookback_days,
+            starting_capital=starting_capital, ending_equity=starting_capital,
+            total_return_pct=0.0, annualized_return_pct=0.0, max_drawdown_pct=0.0,
+            profitable_segments=0, total_segments=0, total_round_trips=0,
+            avg_segment_return_pct=0.0, worst_segment_return_pct=0.0, best_segment_return_pct=0.0,
+            bars_in_range_pct=0.0,
+        )
+
+    bars = sorted(bars, key=lambda b: b["timestamp"])
+    segments_out: list[WalkForwardSegment] = []
+    equity_curve_out: list[dict] = []
+    capital = starting_capital
+    total_round_trips = 0
+    bars_in_range_total = 0
+    bars_seen_total = 0
+
+    # Walk by segment_days, requiring lookback_days behind us first
+    i = lookback_days
+    while i < len(bars):
+        seg_end_idx = min(i + segment_days, len(bars))
+        lookback_slice = bars[max(0, i - lookback_days):i]
+        segment_bars = bars[i:seg_end_idx]
+        if len(segment_bars) < 2:
+            break
+
+        # Derive grid from lookback's hi/lo (using highs and lows, not closes)
+        highs = [b["high"] for b in lookback_slice]
+        lows = [b["low"] for b in lookback_slice]
+        if not highs or not lows:
+            i = seg_end_idx
+            continue
+        rng_hi = max(highs)
+        rng_lo = min(lows)
+        rng = rng_hi - rng_lo
+        lower = rng_lo + rng * 0.10
+        upper = rng_hi - rng * 0.10
+        if upper <= lower or lower <= 0:
+            i = seg_end_idx
+            continue
+
+        config = GridConfig(
+            pair=pair, lower=lower, upper=upper, n_levels=n_levels,
+            capital_usd=capital, fee_rate=fee_rate,
+        )
+        result = simulate(config, segment_bars)
+
+        ending_equity = capital + result.total_pnl_usd
+
+        # How often price stayed in range during this segment
+        in_range = sum(
+            1 for b in segment_bars if lower <= b["close"] <= upper
+        )
+        bars_in_range_total += in_range
+        bars_seen_total += len(segment_bars)
+
+        seg = WalkForwardSegment(
+            period_start=str(segment_bars[0]["timestamp"]),
+            period_end=str(segment_bars[-1]["timestamp"]),
+            config_lower=round(lower, 2),
+            config_upper=round(upper, 2),
+            starting_capital=round(capital, 2),
+            ending_equity=round(ending_equity, 2),
+            return_pct=round((ending_equity - capital) / capital, 4) if capital > 0 else 0.0,
+            round_trips=result.round_trips,
+            max_drawdown_pct=result.max_drawdown_pct,
+            bars_in_range_pct=round(in_range / len(segment_bars), 4),
+        )
+        segments_out.append(seg)
+
+        # Stitch the segment's per-bar equity into the global equity curve.
+        # Re-base each segment's equity_curve to its starting capital.
+        for pt in result.equity_curve:
+            equity_curve_out.append({
+                "timestamp": pt["timestamp"],
+                "equity": round(capital + (pt["equity"] - config.capital_usd), 2),
+            })
+
+        capital = ending_equity
+        total_round_trips += result.round_trips
+        i = seg_end_idx
+
+    if not segments_out:
+        return WalkForwardResult(
+            pair=pair, segment_days=segment_days, lookback_days=lookback_days,
+            starting_capital=starting_capital, ending_equity=starting_capital,
+            total_return_pct=0.0, annualized_return_pct=0.0, max_drawdown_pct=0.0,
+            profitable_segments=0, total_segments=0, total_round_trips=0,
+            avg_segment_return_pct=0.0, worst_segment_return_pct=0.0, best_segment_return_pct=0.0,
+            bars_in_range_pct=0.0,
+        )
+
+    total_return = (capital - starting_capital) / starting_capital
+    days_total = len(equity_curve_out)
+    years = days_total / 365.0 if days_total > 0 else 0.0
+    annualized = ((1 + total_return) ** (1 / years) - 1) if years > 0.1 else total_return
+
+    # Global max drawdown from the stitched equity curve
+    max_dd = 0.0
+    if equity_curve_out:
+        peak = equity_curve_out[0]["equity"]
+        for pt in equity_curve_out:
+            peak = max(peak, pt["equity"])
+            dd = (pt["equity"] - peak) / peak if peak > 0 else 0.0
+            max_dd = min(max_dd, dd)
+
+    seg_returns = [s.return_pct for s in segments_out]
+    profitable = sum(1 for r in seg_returns if r > 0)
+
+    return WalkForwardResult(
+        pair=pair,
+        segment_days=segment_days,
+        lookback_days=lookback_days,
+        starting_capital=starting_capital,
+        ending_equity=round(capital, 2),
+        total_return_pct=round(total_return, 4),
+        annualized_return_pct=round(annualized, 4),
+        max_drawdown_pct=round(max_dd, 4),
+        profitable_segments=profitable,
+        total_segments=len(segments_out),
+        total_round_trips=total_round_trips,
+        avg_segment_return_pct=round(sum(seg_returns) / len(seg_returns), 4),
+        worst_segment_return_pct=round(min(seg_returns), 4),
+        best_segment_return_pct=round(max(seg_returns), 4),
+        bars_in_range_pct=round(bars_in_range_total / bars_seen_total, 4) if bars_seen_total else 0.0,
+        segments=[asdict(s) for s in segments_out],
+        equity_curve=equity_curve_out,
+    )
 
 
 def simulate(config: GridConfig, bars: Iterable[dict]) -> GridResult:
